@@ -1,0 +1,422 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.xxl.job.admin.mapper.SystemUserMapper">
+
+    <resultMap id="SystemUser" type="com.xxl.job.admin.model.SystemUser">
+        <result column="id" property="id"/>
+        <result column="username" property="username"/>
+        <result column="password" property="password"/>
+        <result column="nickname" property="nickname"/>
+        <result column="remark" property="remark"/>
+        <result column="dept_id" property="deptId"/>
+        <result column="post_ids" property="postIds"/>
+        <result column="email" property="email"/>
+        <result column="mobile" property="mobile"/>
+        <result column="sex" property="sex"/>
+        <result column="avatar" property="avatar"/>
+        <result column="status" property="status"/>
+        <result column="login_ip" property="loginIp"/>
+        <result column="login_date" property="loginDate"/>
+        <result column="creator" property="creator"/>
+        <result column="create_time" property="createTime"/>
+        <result column="updater" property="updater"/>
+        <result column="update_time" property="updateTime"/>
+        <result column="deleted" property="deleted"/>
+        <result column="tenant_id" property="tenantId"/>
+        <result column="guid" property="guid"/>
+        <result column="effdt" property="effdt"/>
+        <result column="empl_class" property="emplClass"/>
+        <result column="dc_empl_cls_descr" property="dcEmplClsDescr"/>
+        <result column="hr_status" property="hrStatus"/>
+        <result column="reg_temp" property="regTemp"/>
+        <result column="reports_to" property="reportsTo"/>
+        <result column="job_indicator" property="jobIndicator"/>
+        <result column="job_indicator_descr" property="jobIndicatorDescr"/>
+        <result column="position_nbr" property="positionNbr"/>
+        <result column="dc_position_descr" property="dcPositionDescr"/>
+        <result column="dc_dept_descr50" property="dcDeptDescr50"/>
+        <result column="manager_posn" property="managerPosn"/>
+        <result column="dc_director_posn" property="dcDirectorPosn"/>
+        <result column="probation_dt" property="probationDt"/>
+        <result column="dc_job_level" property="dcJobLevel"/>
+        <result column="dc_job_level_descr" property="dcJobLevelDescr"/>
+        <result column="dc_job_grade" property="dcJobGrade"/>
+        <result column="dc_job_grade_descr" property="dcJobGradeDescr"/>
+        <result column="dc_job_stage" property="dcJobStage"/>
+        <result column="dc_job_stage_descr" property="dcJobStageDescr"/>
+        <result column="last_hire_dt" property="lastHireDt"/>
+        <result column="company" property="company"/>
+        <result column="dc_company_descr" property="dcCompanyDescr"/>
+        <result column="business_unit" property="businessUnit"/>
+        <result column="business_descr" property="businessDescr"/>
+    </resultMap>
+
+    <!-- 基础字段列表 -->
+    <sql id="Base_Column_List">
+        t.id,
+        t.username,
+        t.password,
+        t.nickname,
+        t.remark,
+        t.dept_id,
+        t.post_ids,
+        t.email,
+        t.mobile,
+        t.sex,
+        t.avatar,
+        t.status,
+        t.login_ip,
+        t.login_date,
+        t.creator,
+        t.create_time,
+        t.updater,
+        t.update_time,
+        t.deleted,
+        t.tenant_id,
+        t.guid,
+        t.effdt,
+        t.empl_class,
+        t.dc_empl_cls_descr,
+        t.hr_status,
+        t.reg_temp,
+        t.reports_to,
+        t.job_indicator,
+        t.job_indicator_descr,
+        t.position_nbr,
+        t.dc_position_descr,
+        t.dc_dept_descr50,
+        t.manager_posn,
+        t.dc_director_posn,
+        t.probation_dt,
+        t.dc_job_level,
+        t.dc_job_level_descr,
+        t.dc_job_grade,
+        t.dc_job_grade_descr,
+        t.dc_job_stage,
+        t.dc_job_stage_descr,
+        t.last_hire_dt,
+        t.company,
+        t.dc_company_descr,
+        t.business_unit,
+        t.business_descr
+    </sql>
+
+    <!-- 分页查询 -->
+    <select id="pageList" parameterType="java.util.HashMap" resultMap="SystemUser">
+        SELECT <include refid="Base_Column_List"/>
+        FROM system_users AS t
+        WHERE t.deleted = 0
+        <trim prefix="AND" prefixOverrides="AND | OR">
+            <if test="username != null and username != ''">
+                AND t.username LIKE CONCAT('%', #{username}, '%')
+            </if>
+            <if test="nickname != null and nickname != ''">
+                AND t.nickname LIKE CONCAT('%', #{nickname}, '%')
+            </if>
+            <if test="mobile != null and mobile != ''">
+                AND t.mobile LIKE CONCAT('%', #{mobile}, '%')
+            </if>
+            <if test="status != null">
+                AND t.status = #{status}
+            </if>
+            <if test="deptId != null">
+                AND t.dept_id = #{deptId}
+            </if>
+        </trim>
+        ORDER BY t.create_time DESC
+        LIMIT #{offset}, #{pagesize}
+    </select>
+
+    <!-- 分页查询总数 -->
+    <select id="pageListCount" parameterType="java.util.HashMap" resultType="int">
+        SELECT COUNT(1)
+        FROM system_users AS t
+        WHERE t.deleted = 0
+        <trim prefix="AND" prefixOverrides="AND | OR">
+            <if test="username != null and username != ''">
+                AND t.username LIKE CONCAT('%', #{username}, '%')
+            </if>
+            <if test="nickname != null and nickname != ''">
+                AND t.nickname LIKE CONCAT('%', #{nickname}, '%')
+            </if>
+            <if test="mobile != null and mobile != ''">
+                AND t.mobile LIKE CONCAT('%', #{mobile}, '%')
+            </if>
+            <if test="status != null">
+                AND t.status = #{status}
+            </if>
+            <if test="deptId != null">
+                AND t.dept_id = #{deptId}
+            </if>
+        </trim>
+    </select>
+
+    <!-- 根据用户名查询 -->
+    <select id="loadByUserName" parameterType="java.util.HashMap" resultMap="SystemUser">
+        SELECT <include refid="Base_Column_List"/>
+        FROM system_users AS t
+        WHERE t.username = #{username}
+        AND t.deleted = 0
+    </select>
+
+    <!-- 根据ID查询 -->
+    <select id="loadById" parameterType="java.util.HashMap" resultMap="SystemUser">
+        SELECT <include refid="Base_Column_List"/>
+        FROM system_users AS t
+        WHERE t.id = #{id}
+        AND t.deleted = 0
+    </select>
+
+    <!-- 保存用户 -->
+    <insert id="save" parameterType="com.xxl.job.admin.model.SystemUser" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO system_users (
+            username,
+            password,
+            nickname,
+            remark,
+            dept_id,
+            post_ids,
+            email,
+            mobile,
+            sex,
+            avatar,
+            status,
+            login_ip,
+            login_date,
+            creator,
+            create_time,
+            updater,
+            update_time,
+            deleted,
+            tenant_id,
+            guid,
+            effdt,
+            empl_class,
+            dc_empl_cls_descr,
+            hr_status,
+            reg_temp,
+            reports_to,
+            job_indicator,
+            job_indicator_descr,
+            position_nbr,
+            dc_position_descr,
+            dc_dept_descr50,
+            manager_posn,
+            dc_director_posn,
+            probation_dt,
+            dc_job_level,
+            dc_job_level_descr,
+            dc_job_grade,
+            dc_job_grade_descr,
+            dc_job_stage,
+            dc_job_stage_descr,
+            last_hire_dt,
+            company,
+            dc_company_descr,
+            business_unit,
+            business_descr
+        ) VALUES (
+                     #{username},
+                     #{password},
+                     #{nickname},
+                     #{remark},
+                     #{deptId},
+                     #{postIds},
+                     #{email},
+                     #{mobile},
+                     #{sex},
+                     #{avatar},
+                     #{status},
+                     #{loginIp},
+                     #{loginDate},
+                     #{creator},
+                     #{createTime},
+                     #{updater},
+                     #{updateTime},
+                     #{deleted},
+                     #{tenantId},
+                     #{guid},
+                     #{effdt},
+                     #{emplClass},
+                     #{dcEmplClsDescr},
+                     #{hrStatus},
+                     #{regTemp},
+                     #{reportsTo},
+                     #{jobIndicator},
+                     #{jobIndicatorDescr},
+                     #{positionNbr},
+                     #{dcPositionDescr},
+                     #{dcDeptDescr50},
+                     #{managerPosn},
+                     #{dcDirectorPosn},
+                     #{probationDt},
+                     #{dcJobLevel},
+                     #{dcJobLevelDescr},
+                     #{dcJobGrade},
+                     #{dcJobGradeDescr},
+                     #{dcJobStage},
+                     #{dcJobStageDescr},
+                     #{lastHireDt},
+                     #{company},
+                     #{dcCompanyDescr},
+                     #{businessUnit},
+                     #{businessDescr}
+                 )
+    </insert>
+
+    <!-- 更新用户 -->
+    <update id="update" parameterType="com.xxl.job.admin.model.SystemUser">
+        UPDATE system_users
+        SET
+        <if test="username != null and username != ''">
+            username = #{username},
+        </if>
+        <if test="password != null and password != ''">
+            password = #{password},
+        </if>
+        <if test="nickname != null and nickname != ''">
+            nickname = #{nickname},
+        </if>
+        <if test="remark != null">
+            remark = #{remark},
+        </if>
+        <if test="deptId != null">
+            dept_id = #{deptId},
+        </if>
+        <if test="postIds != null">
+            post_ids = #{postIds},
+        </if>
+        <if test="email != null">
+            email = #{email},
+        </if>
+        <if test="mobile != null">
+            mobile = #{mobile},
+        </if>
+        <if test="sex != null">
+            sex = #{sex},
+        </if>
+        <if test="avatar != null">
+            avatar = #{avatar},
+        </if>
+        <if test="status != null">
+            status = #{status},
+        </if>
+        <if test="updater != null">
+            updater = #{updater},
+        </if>
+        update_time = NOW(),
+        <if test="guid != null">
+            guid = #{guid},
+        </if>
+        <if test="effdt != null">
+            effdt = #{effdt},
+        </if>
+        <if test="emplClass != null">
+            empl_class = #{emplClass},
+        </if>
+        <if test="dcEmplClsDescr != null">
+            dc_empl_cls_descr = #{dcEmplClsDescr},
+        </if>
+        <if test="hrStatus != null">
+            hr_status = #{hrStatus},
+        </if>
+        <if test="regTemp != null">
+            reg_temp = #{regTemp},
+        </if>
+        <if test="reportsTo != null">
+            reports_to = #{reportsTo},
+        </if>
+        <if test="jobIndicator != null">
+            job_indicator = #{jobIndicator},
+        </if>
+        <if test="jobIndicatorDescr != null">
+            job_indicator_descr = #{jobIndicatorDescr},
+        </if>
+        <if test="positionNbr != null">
+            position_nbr = #{positionNbr},
+        </if>
+        <if test="dcPositionDescr != null">
+            dc_position_descr = #{dcPositionDescr},
+        </if>
+        <if test="dcDeptDescr50 != null">
+            dc_dept_descr50 = #{dcDeptDescr50},
+        </if>
+        <if test="managerPosn != null">
+            manager_posn = #{managerPosn},
+        </if>
+        <if test="dcDirectorPosn != null">
+            dc_director_posn = #{dcDirectorPosn},
+        </if>
+        <if test="probationDt != null">
+            probation_dt = #{probationDt},
+        </if>
+        <if test="dcJobLevel != null">
+            dc_job_level = #{dcJobLevel},
+        </if>
+        <if test="dcJobLevelDescr != null">
+            dc_job_level_descr = #{dcJobLevelDescr},
+        </if>
+        <if test="dcJobGrade != null">
+            dc_job_grade = #{dcJobGrade},
+        </if>
+        <if test="dcJobGradeDescr != null">
+            dc_job_grade_descr = #{dcJobGradeDescr},
+        </if>
+        <if test="dcJobStage != null">
+            dc_job_stage = #{dcJobStage},
+        </if>
+        <if test="dcJobStageDescr != null">
+            dc_job_stage_descr = #{dcJobStageDescr},
+        </if>
+        <if test="lastHireDt != null">
+            last_hire_dt = #{lastHireDt},
+        </if>
+        <if test="company != null">
+            company = #{company},
+        </if>
+        <if test="dcCompanyDescr != null">
+            dc_company_descr = #{dcCompanyDescr},
+        </if>
+        <if test="businessUnit != null">
+            business_unit = #{businessUnit},
+        </if>
+        <if test="businessDescr != null">
+            business_descr = #{businessDescr}
+        </if>
+        WHERE id = #{id}
+    </update>
+
+    <!-- 逻辑删除用户 -->
+    <delete id="delete" parameterType="java.util.HashMap">
+        UPDATE system_users
+        SET deleted = 1
+        WHERE id = #{id}
+    </delete>
+
+    <!-- 更新最后登录信息 -->
+    <update id="updateLoginInfo" parameterType="java.util.HashMap">
+        UPDATE system_users
+        SET login_ip = #{loginIp},
+            login_date = #{loginDate}
+        WHERE id = #{id}
+    </update>
+
+    <!-- 批量删除 -->
+    <delete id="batchDelete" parameterType="java.util.List">
+        UPDATE system_users
+        SET deleted = 1
+        WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <!-- 更新用户状态 -->
+    <update id="updateStatus" parameterType="java.util.HashMap">
+        UPDATE system_users
+        SET status = #{status}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

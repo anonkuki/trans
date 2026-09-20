@@ -1,2 +1,42 @@
 .worktrees/
 
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+
+# Java / frontend build output
+**/target/
+**/node_modules/
+**/dist/
+**/dist-prod/
+**/.pnpm-store/
+
+# Python runtime and generated data
+**/.venv/
+**/.venv-*/
+**/__pycache__/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/*.py[cod]
+services/document-engine/data/
+services/document-engine/.local-tools/
+services/document-engine/output/
+services/document-engine/work/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+

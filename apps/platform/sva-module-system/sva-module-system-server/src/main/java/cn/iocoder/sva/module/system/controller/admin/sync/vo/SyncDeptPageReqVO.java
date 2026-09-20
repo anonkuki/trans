@@ -1,0 +1,133 @@
+package cn.iocoder.sva.module.system.controller.admin.sync.vo;
+
+import cn.iocoder.sva.framework.common.pojo.PageParam;
+import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
+import org.springframework.format.annotation.DateTimeFormat;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+
+import static cn.iocoder.sva.framework.common.util.date.DateUtils.FORMAT_YEAR_MONTH_DAY_HOUR_MINUTE_SECOND;
+
+@Schema(description = "管理后台 - 部门信息同步分页 Request VO")
+@Data
+public class SyncDeptPageReqVO extends PageParam {
+
+    @Schema(description = "唯一ID", example = "6171")
+    private String guid;
+
+    @Schema(description = "数据状态：A-新增，U-更新，D-删除", example = "1")
+    private String dcInfDtStatus;
+
+    @Schema(description = "集合ID", example = "99")
+    private String setid;
+
+    @Schema(description = "部门ID", example = "22710")
+    private String deptid;
+
+    @Schema(description = "生效日期")
+    private LocalDate effdt;
+
+    @Schema(description = "生效状态：A-有效，I-无效", example = "1")
+    private String effStatus;
+
+    @Schema(description = "生效状态描述")
+    private String effStatusDescr;
+
+    @Schema(description = "部门名称")
+    private String descr;
+
+    @Schema(description = "部门简称")
+    private String descrshort;
+
+    @Schema(description = "地点集合ID")
+    private String setidLocation;
+
+    @Schema(description = "地点ID")
+    private String location;
+
+    @Schema(description = "地点")
+    private String dcLocationDescr;
+
+    @Schema(description = "所属公司ID")
+    private String company;
+
+    @Schema(description = "所属公司名称")
+    private String dcCompanyDescr;
+
+    @Schema(description = "组织类型：10-公司,20-体系，30-部门，40-项目，50-班组", example = "2")
+    private String dcOrgType;
+
+    @Schema(description = "组织类型描述")
+    private String dcOrgTypeDescr;
+
+    @Schema(description = "组织类别：10-一级组织，20-二级组织，30-三级组织")
+    private String dcOrgLevel;
+
+    @Schema(description = "组织类别描述")
+    private String dcOrgLevelDescr;
+
+    @Schema(description = "上级部门ID")
+    private String partDeptidChn;
+
+    @Schema(description = "上级部门")
+    private String dcParDeptDescr;
+
+    @Schema(description = "组织负责人岗位ID")
+    private String managerPosn;
+
+    @Schema(description = "部门分管总监岗位ID")
+    private String dcDirectorPosn;
+
+    @Schema(description = "部门分管副总经理岗位ID")
+    private String dcManagerPosn;
+
+    @Schema(description = "成立日期")
+    @DateTimeFormat(pattern = FORMAT_YEAR_MONTH_DAY_HOUR_MINUTE_SECOND)
+    private LocalDate[] dcSetupDate;
+
+    @Schema(description = "成立文号")
+    private String dcSetupNum;
+
+    @Schema(description = "成本中心ID")
+    private String dcCostCenter;
+
+    @Schema(description = "体系ID")
+    private String dcOrgBranch;
+
+    @Schema(description = "体系")
+    private String dcOrgBranchDescr;
+
+    @Schema(description = "成立原因", example = "不对")
+    private String dcSetupReason;
+
+    @Schema(description = "部门职责")
+    private String dcDeptRespon;
+
+    @Schema(description = "部门全路径")
+    private String dcDeptFullCode;
+
+    @Schema(description = "部门全路径名称")
+    private String dcDeptFullDescr;
+
+    @Schema(description = "红海转换ID", example = "23680")
+    private String dcHonghaiDeptid;
+
+    @Schema(description = "SAP公司代码", example = "19443")
+    private String dcSapCompanyid;
+
+    @Schema(description = "一级部门")
+    private String dcDeptidLv01;
+
+    @Schema(description = "二级部门")
+    private String dcDeptidLv02;
+
+    @Schema(description = "三级部门")
+    private String dcDeptidLv03;
+
+    @Schema(description = "创建时间")
+    @DateTimeFormat(pattern = FORMAT_YEAR_MONTH_DAY_HOUR_MINUTE_SECOND)
+    private LocalDateTime[] createTime;
+
+}

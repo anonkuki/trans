@@ -1,0 +1,46 @@
+openapi: 3.1.0
+info:
+  title: Internal Document Engine API
+  version: 1.0.0
+paths:
+  /internal/v1/ocr/recognize:
+    post:
+      summary: Recognize one PDF and return document.v1
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: OCR completed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contract_version, request_id, provider, document]
+                properties:
+                  contract_version: { const: '1.0' }
+                  request_id: { type: string }
+                  provider: { type: string }
+                  document:
+                    $ref: './document.v1.schema.json'
+        '401': { description: Invalid internal token }
+        '413': { description: PDF too large }
+        '415': { description: Not a PDF }
+        '502': { description: OCR provider failure }
+        '503': { description: Internal OCR token is not configured }
+components:
+  securitySchemes:
+    internalToken:
+      type: apiKey
+      in: header
+      name: X-Internal-Token

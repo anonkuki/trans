@@ -1,0 +1,8 @@
+cn.iocoder.sva.framework.apilog.config.YudaoApiLogAutoConfiguration
+cn.iocoder.sva.framework.jackson.config.YudaoJacksonAutoConfiguration
+cn.iocoder.sva.framework.swagger.config.YudaoSwaggerAutoConfiguration
+cn.iocoder.sva.framework.web.config.YudaoWebAutoConfiguration
+cn.iocoder.sva.framework.apilog.config.YudaoApiLogRpcAutoConfiguration
+cn.iocoder.sva.framework.xss.config.YudaoXssAutoConfiguration
+cn.iocoder.sva.framework.banner.config.YudaoBannerAutoConfiguration
+cn.iocoder.sva.framework.encrypt.config.YudaoApiEncryptAutoConfiguration

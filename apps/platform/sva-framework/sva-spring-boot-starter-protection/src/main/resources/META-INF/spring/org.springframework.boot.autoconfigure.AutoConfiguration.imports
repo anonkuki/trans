@@ -1,0 +1,4 @@
+cn.iocoder.sva.framework.idempotent.config.YudaoIdempotentConfiguration
+cn.iocoder.sva.framework.lock4j.config.YudaoLock4jConfiguration
+cn.iocoder.sva.framework.ratelimiter.config.YudaoRateLimiterConfiguration
+cn.iocoder.sva.framework.signature.config.YudaoApiSignatureAutoConfiguration

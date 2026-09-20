@@ -1,0 +1,5 @@
+cn.iocoder.sva.framework.security.config.YudaoSecurityRpcAutoConfiguration
+cn.iocoder.sva.framework.security.config.YudaoSecurityAutoConfiguration
+cn.iocoder.sva.framework.security.config.YudaoWebSecurityConfigurerAdapter
+cn.iocoder.sva.framework.operatelog.config.YudaoOperateLogConfiguration
+cn.iocoder.sva.framework.operatelog.config.YudaoOperateLogRpcAutoConfiguration

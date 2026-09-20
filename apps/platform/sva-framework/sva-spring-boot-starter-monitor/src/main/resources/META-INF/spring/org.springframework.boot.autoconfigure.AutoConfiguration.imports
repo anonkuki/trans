@@ -1,0 +1,2 @@
+cn.iocoder.sva.framework.tracer.config.YudaoTracerAutoConfiguration
+cn.iocoder.sva.framework.tracer.config.YudaoMetricsAutoConfiguration

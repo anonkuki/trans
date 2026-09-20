@@ -1,0 +1,3 @@
+cn.iocoder.sva.framework.datapermission.config.YudaoDataPermissionAutoConfiguration
+cn.iocoder.sva.framework.datapermission.config.YudaoDeptDataPermissionAutoConfiguration
+cn.iocoder.sva.framework.datapermission.config.YudaoDataPermissionRpcAutoConfiguration

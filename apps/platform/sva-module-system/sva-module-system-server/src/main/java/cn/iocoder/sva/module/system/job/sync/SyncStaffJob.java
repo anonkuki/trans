@@ -1,0 +1,498 @@
+package cn.iocoder.sva.module.system.job.sync;
+
+import cn.hutool.core.util.StrUtil;
+import cn.iocoder.sva.module.system.dal.dataobject.dept.PostDO;
+import cn.iocoder.sva.module.system.dal.dataobject.dept.UserPostDO;
+import cn.iocoder.sva.module.system.dal.dataobject.sync.SyncPersonDO;
+import cn.iocoder.sva.module.system.dal.dataobject.sync.SyncStaffDO;
+import cn.iocoder.sva.module.system.dal.dataobject.user.AdminUserDO;
+import cn.iocoder.sva.module.system.dal.mysql.dept.PostMapper;
+import cn.iocoder.sva.module.system.dal.mysql.dept.UserPostMapper;
+import cn.iocoder.sva.module.system.dal.mysql.sync.SyncPersonMapper;
+import cn.iocoder.sva.module.system.dal.mysql.sync.SyncStaffMapper;
+import cn.iocoder.sva.module.system.dal.mysql.user.AdminUserMapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.xxl.job.core.biz.model.ReturnT;
+import com.xxl.job.core.context.XxlJobHelper;
+import com.xxl.job.core.handler.annotation.XxlJob;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.*;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+import org.springframework.web.client.RestTemplate;
+
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+
+/**
+ * 员工信息同步定时任务
+ *
+ * @author LIKE
+ */
+@Slf4j
+@Component
+public class SyncStaffJob {
+
+    @Autowired
+    private SyncStaffMapper syncStaffMapper;
+
+    @Value("${syncStaffUrl}")
+    private String syncStaffUrl;
+
+    @Value("${syncAuth.username}")
+    private String basicAuthUsername;
+
+    @Value("${syncAuth.password}")
+    private String basicAuthPassword;
+
+    @Value("${syncAuth.userid}")
+    private String syncUserId;
+
+    @Autowired
+    private RestTemplate restTemplate;
+
+    @Autowired
+    private AdminUserMapper adminUserMapper;
+
+    @Autowired
+    private PostMapper postMapper;
+
+    @Autowired
+    private UserPostMapper  userPostMapper;
+
+    // 员工同步的 INF_ID
+    private static final String INF_ID = "DC_PERSON";
+    private static final int PAGE_SIZE = 2000;
+
+    private RestTemplate getSimpleRestTemplate() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(30000);
+        factory.setReadTimeout(30000);
+        return new RestTemplate(factory);
+    }
+
+    @XxlJob(value = "syncStaff", init = "init", destroy = "destroy")
+    @Transactional(rollbackFor = Exception.class)
+    public ReturnT<String> execute() {
+        log.info("==================== 开始同步员工信息 ====================");
+//        log.info("请求URL: {}", syncStaffUrl);
+//        log.info("Basic Auth用户名: {}", basicAuthUsername);
+//        log.info("Basic Auth密码: {}", basicAuthPassword);
+//        log.info("INF_ID: {}", INF_ID);
+//        log.info("USERID参数: {}", getUserId());
+        String flag = XxlJobHelper.getJobParam();
+        // 入参为空则默认开启更新人员信息，0为关闭任何更新,1开启更新人员信息,2开启岗位关联
+        log.info("flag入参是: {}", flag);
+        long startTime = System.currentTimeMillis();
+
+        try {
+            int totalCount = getTotalCount(restTemplate);
+            log.info("需要同步的员工总数: {}", totalCount);
+
+            if (totalCount == 0) {
+                log.info("没有需要同步的数据");
+                return ReturnT.SUCCESS;
+            }
+
+            int totalPages = (totalCount + PAGE_SIZE - 1) / PAGE_SIZE;
+            log.info("总页数: {}", totalPages);
+
+            List<SyncStaffDO> allDataList = new ArrayList<>();
+            for (int pageNum = 1; pageNum <= totalPages; pageNum++) {
+                log.info("正在同步第 {}/{} 页", pageNum, totalPages);
+                List<SyncStaffDO> pageData = fetchPageData(restTemplate, pageNum);
+                allDataList.addAll(pageData);
+                log.info("第 {} 页同步完成，本页数据量: {}", pageNum, pageData.size());
+            }
+
+            if (!allDataList.isEmpty()) {
+                // 删除所有旧数据
+                syncStaffMapper.delete(null);
+                log.info("已删除所有旧数据");
+                List<AdminUserDO> adminUserDOS = new ArrayList<>();
+
+                // 默认不传参或者传参包含1，则预备进行人员信息保存更新转换处理
+                if(StrUtil.isEmpty(flag) || flag.contains("1")) {
+                    adminUserDOS = convertToAdminUserDOList(allDataList);
+                }
+
+                // 批量插入新数据
+                int insertCount = 0;
+                int batchSize = 1000;
+                for (int i = 0; i < allDataList.size(); i += batchSize) {
+                    int end = Math.min(i + batchSize, allDataList.size());
+                    List<SyncStaffDO> batchList = allDataList.subList(i, end);
+                    for (SyncStaffDO syncStaffDO : batchList) {
+                        syncStaffMapper.insert(syncStaffDO);
+                        insertCount++;
+                    }
+                    log.info("已插入 {} 条数据", insertCount);
+                }
+                // 默认不传参或者传参包含1，则进行人员信息保存更新
+                if(StrUtil.isEmpty(flag) || flag.contains("1")) {
+                    savePersonData(adminUserDOS);
+                }
+                // 若传参且包含2则进行岗位关联
+                if(StrUtil.isNotEmpty(flag) && flag.contains("2")) {
+                    setPosiByPerson(adminUserDOS);
+                }
+
+                log.info("数据插入完成，共插入 {} 条记录", insertCount);
+            } else {
+                log.warn("未获取到任何数据");
+            }
+
+            long endTime = System.currentTimeMillis();
+            log.info("员工信息同步完成，总耗时: {} ms", (endTime - startTime));
+            log.info("==================== 同步结束 ====================");
+            return ReturnT.SUCCESS;
+
+        } catch (Exception e) {
+            log.error("员工信息同步失败", e);
+            return new ReturnT<>(ReturnT.FAIL_CODE, "同步失败: " + e.getMessage());
+        }
+    }
+
+    //将转换后的人员数据新增或更新到数据库
+    private void savePersonData(List<AdminUserDO> adminUserDOS) {
+        for (AdminUserDO adminUserDO : adminUserDOS){
+            String username = adminUserDO.getUsername();
+            Long num = adminUserMapper.selectCount(new QueryWrapper<AdminUserDO>().eq("username", username));
+            if (num == 0){
+                adminUserMapper.insert(adminUserDO);
+            } else {
+                adminUserMapper.update(adminUserDO, new QueryWrapper<AdminUserDO>().eq("username", username));
+            }
+        }
+    }
+
+    private void setPosiByPerson(List<AdminUserDO> adminUserDOS) {
+        List<String> userIdList = new ArrayList<>();
+
+        for (AdminUserDO adminUserDO : adminUserDOS){
+            String username = adminUserDO.getUsername();
+            List<AdminUserDO> oneList = adminUserMapper.selectList(new QueryWrapper<AdminUserDO>().eq("username", username));
+            if(!oneList.isEmpty()){
+                AdminUserDO aud = oneList.get(0);
+                Long id = aud.getId();
+
+                // 确保只删除此人的人员岗位关联并且只删一次
+                if(!userIdList.contains(username)){
+                    userPostMapper.delete(new QueryWrapper<UserPostDO>().eq("user_id",id));
+                    userIdList.add(username);
+                }
+
+                String positionNbr = adminUserDO.getPositionNbr();
+                List<PostDO> code = postMapper.selectList(new QueryWrapper<PostDO>().eq("code", positionNbr));
+                if(!code.isEmpty()){
+                    PostDO postDO = code.get(0);
+                    Long postDOId = postDO.getId();
+                    // 拼接人员和岗位关联关系并保存
+                    UserPostDO userPostDO = new UserPostDO();
+                    userPostDO.setPostId(postDOId);
+                    userPostDO.setUserId(id);
+                    userPostMapper.insert(userPostDO);
+                }
+            }
+        }
+    }
+
+
+    // 将同步表数据转成AdminUserDo列表
+    private List<AdminUserDO> convertToAdminUserDOList(List<SyncStaffDO> syncStaffDOList) {
+        List<AdminUserDO> adminUserDOS = new ArrayList<>();
+        for (SyncStaffDO syncStaffDO : syncStaffDOList){
+
+            String deptid = syncStaffDO.getDeptid();
+            if (deptid == null) {
+                deptid = "0";
+                log.info("人员部门信息不存在：{}", syncStaffDO.getEmplid());
+            }
+            // 岗位编号数组
+            Set<String> postList = new HashSet<>();
+            AdminUserDO adminUserDO = new AdminUserDO();
+            adminUserDO.setUsername(syncStaffDO.getEmplid());
+            adminUserDO.setNickname(syncStaffDO.getNameDisplay());
+            try {
+                adminUserDO.setDeptId(Long.parseLong(deptid));
+            } catch (Exception e){
+                adminUserDO.setDeptId(0L);
+            }
+            if(!StrUtil.isBlank(syncStaffDO.getDcInfDtStatus())){
+                adminUserDO.setStatus(syncStaffDO.getDcInfDtStatus().equals("D") ? 1 : 0);
+            } else {
+                adminUserDO.setStatus(1);
+            }
+            String phone = syncStaffDO.getPhone();
+            if(StrUtil.isNotBlank(phone) && phone.length() <= 11){
+                adminUserDO.setMobile(phone);
+            }
+            adminUserDO.setGuid(syncStaffDO.getGuid());
+            adminUserDO.setSex("F".equals(syncStaffDO.getSex())?2:1);
+            adminUserDO.setEffdt(syncStaffDO.getEffdt());
+            adminUserDO.setEmplClass(syncStaffDO.getEmplClass());
+            adminUserDO.setDcEmplClsDescr(syncStaffDO.getDcEmplClsDescr());
+            adminUserDO.setHrStatus(syncStaffDO.getHrStatus());
+            adminUserDO.setRegTemp(syncStaffDO.getRegTemp());
+            adminUserDO.setReportsTo(syncStaffDO.getReportsTo());
+            adminUserDO.setEmail(syncStaffDO.getEmailAddr());
+//            adminUserDO.setJobIndicator(syncStaffDO.getJobIndicator());
+//            adminUserDO.setJobIndicatorDescr(syncStaffDO.getJobIndicatorDescr());
+            adminUserDO.setPositionNbr(syncStaffDO.getPositionNbr());
+            adminUserDO.setDcPositionDescr(syncStaffDO.getDcPositionDescr());
+            adminUserDO.setDcDeptDescr50(syncStaffDO.getDcDeptDescr50());
+            adminUserDO.setManagerPosn(syncStaffDO.getManagerPosn());
+            adminUserDO.setDcDirectorPosn(syncStaffDO.getDcDirectorPosn());
+            adminUserDO.setProbationDt(syncStaffDO.getProbationDt());
+            adminUserDO.setDcJobLevel(syncStaffDO.getDcJobLevel());
+            adminUserDO.setDcJobLevelDescr(syncStaffDO.getDcJobLevelDescr());
+            adminUserDO.setDcJobGrade(syncStaffDO.getDcJobGrade());
+            adminUserDO.setDcJobGradeDescr(syncStaffDO.getDcJobGradeDescr());
+            adminUserDO.setDcJobStage(syncStaffDO.getDcJobStage());
+            adminUserDO.setDcJobStageDescr(syncStaffDO.getDcJobStageDescr());
+            adminUserDO.setLastHireDt(syncStaffDO.getLastHireDt());
+            adminUserDO.setCompany(syncStaffDO.getCompany());
+            adminUserDO.setDcCompanyDescr(syncStaffDO.getDcCompanyDescr());
+            adminUserDO.setBusinessUnit(syncStaffDO.getBusinessUnit());
+            adminUserDO.setBusinessDescr(syncStaffDO.getBusinessDescr());
+
+            adminUserDOS.add(adminUserDO);
+        }
+        return adminUserDOS;
+    }
+
+
+
+    private String getUserId() {
+        return StringUtils.hasText(syncUserId) ? syncUserId : basicAuthUsername;
+    }
+
+    private int getTotalCount(RestTemplate restTemplate) {
+        try {
+            Map<String, String> requestBody = buildRequestBody(1, 1);
+            ResponseEntity<Map> response = sendRequest(restTemplate, requestBody);
+            Map<String, Object> responseBody = response.getBody();
+            if (responseBody != null && responseBody.containsKey("TOTALROWCOUNT")) {
+                Object totalRowCount = responseBody.get("TOTALROWCOUNT");
+                if (totalRowCount instanceof Integer) {
+                    return (int) totalRowCount;
+                } else if (totalRowCount instanceof Number) {
+                    return ((Number) totalRowCount).intValue();
+                }
+            }
+            return 0;
+        } catch (Exception e) {
+            log.error("获取总记录数失败", e);
+            throw new RuntimeException("获取总记录数失败", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<SyncStaffDO> fetchPageData(RestTemplate restTemplate, int pageNum) {
+        try {
+            Map<String, String> requestBody = buildRequestBody(pageNum, PAGE_SIZE);
+            ResponseEntity<Map> response = sendRequest(restTemplate, requestBody);
+            Map<String, Object> responseBody = response.getBody();
+
+            if (responseBody == null || !responseBody.containsKey("DATA")) {
+                return new ArrayList<>();
+            }
+
+            List<Map<String, Object>> dataList = (List<Map<String, Object>>) responseBody.get("DATA");
+            if (dataList == null || dataList.isEmpty()) {
+                return new ArrayList<>();
+            }
+
+            List<SyncStaffDO> syncStaffDOList = new ArrayList<>();
+            for (Map<String, Object> item : dataList) {
+                SyncStaffDO syncStaffDO = convertToSyncStaffDO(item);
+                syncStaffDOList.add(syncStaffDO);
+            }
+
+            return syncStaffDOList;
+        } catch (Exception e) {
+            log.error("获取第 {} 页数据失败", pageNum, e);
+            throw new RuntimeException("获取第 " + pageNum + " 页数据失败", e);
+        }
+    }
+
+    private Map<String, String> buildRequestBody(int pageNum, int pageSize) {
+        return Map.of(
+                "INF_ID", INF_ID,
+                "PAGENBR", String.valueOf(pageNum),
+                "PAGESIZE", String.valueOf(pageSize),
+                "BGNDTTM", "2020-03-27 14:30:25",
+                "ENDDTTM", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
+                "USERID", getUserId()
+        );
+    }
+
+    private ResponseEntity<Map> sendRequest(RestTemplate restTemplate, Map<String, String> requestBody) {
+        try {
+            String auth = basicAuthUsername + ":" + basicAuthPassword;
+            String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+            String authorization = "Basic " + encodedAuth;
+
+            String jsonBody = String.format(
+                    "{\"INF_ID\":\"%s\",\"PAGENBR\":\"%s\",\"PAGESIZE\":\"%s\",\"BGNDTTM\":\"%s\",\"ENDDTTM\":\"%s\",\"USERID\":\"%s\"}",
+                    requestBody.get("INF_ID"),
+                    requestBody.get("PAGENBR"),
+                    requestBody.get("PAGESIZE"),
+                    requestBody.get("BGNDTTM"),
+                    requestBody.get("ENDDTTM"),
+                    requestBody.get("USERID")
+            );
+
+            log.info("========== 发送HTTP请求 ==========");
+            log.info("请求URL: {}", syncStaffUrl);
+            log.info("Authorization: {}", authorization);
+            log.info("请求体: {}", jsonBody);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("Authorization", authorization);
+            headers.set("User-Agent", "PostmanRuntime/7.15.2");
+            headers.set("Accept", "*/*");
+            headers.set("Cache-Control", "no-cache");
+            headers.set("Connection", "keep-alive");
+
+            HttpEntity<String> requestEntity = new HttpEntity<>(jsonBody, headers);
+
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    syncStaffUrl,
+                    HttpMethod.POST,
+                    requestEntity,
+                    Map.class
+            );
+
+            log.info("响应状态码: {}", response.getStatusCode());
+            log.info("响应体: {}", response.getBody());
+            log.info("=================================");
+
+            if (response.getStatusCode() != HttpStatus.OK) {
+                log.error("请求失败，状态码: {}", response.getStatusCode());
+                throw new RuntimeException("请求失败，状态码: " + response.getStatusCode());
+            }
+
+            return response;
+
+        } catch (Exception e) {
+            log.error("发送HTTP请求失败，URL: {}", syncStaffUrl, e);
+            throw new RuntimeException("发送HTTP请求失败", e);
+        }
+    }
+
+    private SyncStaffDO convertToSyncStaffDO(Map<String, Object> map) {
+        return SyncStaffDO.builder()
+                .guid(getStringValue(map, "GUID"))
+                .dcInfDtStatus(getStringValue(map, "DC_INF_DT_STATUS"))
+                .dcInfDtStatusDescr(getStringValue(map, "DC_INF_DT_STATUS_DESCR"))
+                .emplid(getStringValue(map, "EMPLID"))
+                .nameDisplay(getStringValue(map, "NAME_DISPLAY"))
+                .sex(getStringValue(map, "SEX"))
+                .sexDescr(getStringValue(map, "SEX_DESCR"))
+                .emailAddr(getStringValue(map, "EMAIL_ADDR"))
+                .phone(getStringValue(map, "PHONE"))
+                .emplClass(getStringValue(map, "EMPL_CLASS"))
+                .dcEmplClsDescr(getStringValue(map, "DC_EMPL_CLS_DESCR"))
+                .hrStatus(getStringValue(map, "HR_STATUS"))
+                .hrStatusDescr(getStringValue(map, "HR_STATUS_DESCR"))
+                .regTemp(getStringValue(map, "REG_TEMP"))
+                .regTempDescr(getStringValue(map, "REG_TEMP_DESCR"))
+                .reportsTo(getStringValue(map, "REPORTS_TO"))
+                .positionNbr(getStringValue(map, "POSITION_NBR"))
+                .dcPositionDescr(getStringValue(map, "DC_POSITION_DESCR"))
+                .regRegion(getStringValue(map, "REG_REGION"))
+                .company(getStringValue(map, "COMPANY"))
+                .dcCompanyDescr(getStringValue(map, "DC_COMPANY_DESCR"))
+                .businessUnit(getStringValue(map, "BUSINESS_UNIT"))
+                .businessDescr(getStringValue(map, "BUSINESS_DESCR"))
+                .deptid(getStringValue(map, "DEPTID"))
+                .dcDeptDescr50(getStringValue(map, "DC_DEPT_DESCR50"))
+                .managerPosn(getStringValue(map, "MANAGER_POSN"))
+                .dcDirectorPosn(getStringValue(map, "DC_DIRECTOR_POSN"))
+                .dcManagerPosn(getStringValue(map, "DC_MANAGER_POSN"))
+                .dcCostCenter(getStringValue(map, "DC_COST_CENTER"))
+                .probationDt(parseLocalDate(getStringValue(map, "PROBATION_DT")))
+                .location(getStringValue(map, "LOCATION"))
+                .dcLocationDescr(getStringValue(map, "DC_LOCATION_DESCR"))
+                .dcPdhFellowYn(getStringValue(map, "DC_PDH_FELLOW_YN"))
+                .dcPdhFellowYnDescr(getStringValue(map, "DC_PDH_FELLOW_YN_DESCR"))
+                .dcDisabledYn(getStringValue(map, "DC_DISABLED_YN"))
+                .dcDisabledYnDescr(getStringValue(map, "DC_DISABLED_YN_DESCR"))
+                .lastHireDt(parseLocalDate(getStringValue(map, "LAST_HIRE_DT")))
+                .dcInternHireDt(parseLocalDate(getStringValue(map, "DC_INTERN_HIRE_DT")))
+                .jobcode(getStringValue(map, "JOBCODE"))
+                .dcJobcodeDescr(getStringValue(map, "DC_JOBCODE_DESCR"))
+                .positionEntryDt(parseLocalDate(getStringValue(map, "POSITION_ENTRY_DT")))
+                .dcJobGroup(getStringValue(map, "DC_JOB_GROUP"))
+                .dcJobGroupDescr(getStringValue(map, "DC_JOB_GROUP_DESCR"))
+                .dcJobSequence(getStringValue(map, "DC_JOB_SEQUENCE"))
+                .dcJobSeqDescr(getStringValue(map, "DC_JOB_SEQ_DESCR"))
+                .dcFirstJobCate(getStringValue(map, "DC_FIRST_JOB_CATE"))
+                .dcJobcateDescr(getStringValue(map, "DC_JOBCATE_DESCR"))
+                .dcJobStage(getStringValue(map, "DC_JOB_STAGE"))
+                .dcJobStageDescr(getStringValue(map, "DC_JOB_STAGE_DESCR"))
+                .dcJobLevel(getStringValue(map, "DC_JOB_LEVEL"))
+                .dcJobLevelDescr(getStringValue(map, "DC_JOB_LEVEL_DESCR"))
+                .dcJobGrade(getStringValue(map, "DC_JOB_GRADE"))
+                .dcJobGradeDescr(getStringValue(map, "DC_JOB_GRADE_DESCR"))
+                .dcSapCompanyid(getStringValue(map, "DC_SAP_COMPANYID"))
+                .dcEmpLevel(getStringValue(map, "DC_EMP_LEVEL"))
+                .dcEmplStage(getStringValue(map, "DC_EMPL_STAGE"))
+                .dcEmplStageDescr(getStringValue(map, "DC_EMPL_STAGE_DESCR"))
+                .nationalIdType(getStringValue(map, "NATIONAL_ID_TYPE"))
+                .nationalId(getStringValue(map, "NATIONAL_ID"))
+                .emplRcd(getStringValue(map, "EMPL_RCD"))
+                .effdt(parseLocalDate(getStringValue(map, "EFFDT")))
+                .effseq(getStringValue(map, "EFFSEQ"))
+                .action(getStringValue(map, "ACTION"))
+                .actionDescr(getStringValue(map, "ACTION_DESCR"))
+                .actionReason(getStringValue(map, "ACTION_REASON"))
+                .actionReasnDescr(getStringValue(map, "ACTION_REASN_DESCR"))
+                .firstName(getStringValue(map, "FIRST_NAME"))
+                .lastName(getStringValue(map, "LAST_NAME"))
+                .build();
+    }
+
+    private String getStringValue(Map<String, Object> map, String key) {
+        Object value = map.get(key);
+        if (value == null) {
+            return null;
+        }
+        return value.toString();
+    }
+
+    private LocalDate parseLocalDate(String dateStr) {
+        if (!StringUtils.hasText(dateStr) || "".equals(dateStr)) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(dateStr);
+        } catch (Exception e) {
+            log.warn("日期解析失败: {}", dateStr);
+            return null;
+        }
+    }
+
+    public void init() {
+        log.info("SyncStaffJob 初始化");
+        log.info("配置信息:");
+        log.info("  - syncStaffUrl: {}", syncStaffUrl);
+        log.info("  - basicAuthUsername: {}", basicAuthUsername);
+        log.info("  - basicAuthPassword: {}", basicAuthPassword);
+        log.info("  - syncUserId: {}", syncUserId);
+        log.info("  - INF_ID: {}", INF_ID);
+    }
+
+    public void destroy() {
+        log.info("SyncStaffJob 销毁");
+    }
+}
