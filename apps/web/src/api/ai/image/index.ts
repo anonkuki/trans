@@ -3,6 +3,8 @@ import request from '@/config/axios'
 // AI 绘图 VO
 export interface ImageVO {
   id: number // 编号
+  userId: number // 用户编号
+  userName: string // 用户昵称
   platform: string // 平台
   model: string // 模型
   prompt: string // 提示词

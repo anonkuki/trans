@@ -21,7 +21,7 @@ public class ExecutorBizTest {
     private static final Logger logger = LoggerFactory.getLogger(ExecutorBizTest.class);
 
     private static String addressUrl = "http://127.0.0.1:9999/";
-    private static String accessToken = "default_token";
+    private static String accessToken = "test-credential";
 
     private ExecutorBiz buildClient(){
         return HttpTool.createClient()

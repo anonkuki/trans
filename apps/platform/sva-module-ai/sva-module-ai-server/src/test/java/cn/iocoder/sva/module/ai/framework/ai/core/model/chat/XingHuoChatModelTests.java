@@ -27,7 +27,7 @@ public class XingHuoChatModelTests {
         .deepSeekApi(DeepSeekApi.builder()
                 .baseUrl(XingHuoChatModel.BASE_URL_V2)
                 .completionsPath(XingHuoChatModel.BASE_COMPLETIONS_PATH_V2)
-                .apiKey("75b161ed2aef4719b275d6e7f2a4d4cd:YWYxYWI2MTA4ODI2NGZlYTQyNjAzZTcz") // appKey:secretKey
+                .apiKey("test-api-key") // appKey:secretKey
                 .build())
         .defaultOptions(DeepSeekChatOptions.builder()
 //                .model("generalv3.5") // 模型

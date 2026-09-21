@@ -30,7 +30,7 @@ public class DouBaoChatModelTests {
             .deepSeekApi(DeepSeekApi.builder()
                     .baseUrl(DouBaoChatModel.BASE_URL)
                     .completionsPath(DouBaoChatModel.COMPLETE_PATH)
-                    .apiKey("5c1b5747-26d2-4ebd-a4e0-dd0e8d8b4272") // apiKey
+                    .apiKey("test-api-key") // apiKey
                     .build())
             .defaultOptions(DeepSeekChatOptions.builder()
                     .model("doubao-1-5-lite-32k-250115") // 模型（doubao）

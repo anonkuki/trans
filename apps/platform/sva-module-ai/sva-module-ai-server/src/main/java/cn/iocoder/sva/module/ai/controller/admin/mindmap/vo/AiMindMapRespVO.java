@@ -15,6 +15,9 @@ public class AiMindMapRespVO {
     @Schema(description = "用户编号", requiredMode = Schema.RequiredMode.REQUIRED, example = "4325")
     private Long userId;
 
+    @Schema(description = "用户昵称", example = "张三")
+    private String userName;
+
     @Schema(description = "生成内容提示", requiredMode = Schema.RequiredMode.REQUIRED, example = "Java 学习路线")
     private String prompt;
 

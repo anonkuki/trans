@@ -53,8 +53,8 @@ public class UserProfileController {
     public CommonResult<UserProfileRespVO> getUserProfile() {
         // 获得用户基本信息
         AdminUserDO user = userService.getUser(getLoginUserId());
-        // 获得用户角色
-        List<RoleDO> userRoles = roleService.getRoleListFromCache(permissionService.getUserRoleIdListByUserId(user.getId()));
+        // 获得用户角色（包含直接分配和部门继承的角色）
+        List<RoleDO> userRoles = roleService.getRoleListFromCache(permissionService.getLoginUserAllRoleIds(user.getId()));
         // 获得部门信息
         DeptDO dept = user.getDeptId() != null ? deptService.getDept(user.getDeptId()) : null;
         // 获得岗位信息

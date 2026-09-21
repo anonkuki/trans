@@ -11,11 +11,11 @@
       <div
         class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-30px w-full max-w-500px mx-20px lt-sm:p-20px"
       >
-        <!-- 右上角的主题、语言选择 -->
-        <div class="flex items-center justify-end space-x-10px mb-6">
+        <!-- 右上角的主题、语言选择（暂时隐藏） -->
+        <!-- <div class="flex items-center justify-end space-x-10px mb-6">
           <ThemeSwitch />
           <LocaleDropdown class="dark:text-white" />
-        </div>
+        </div> -->
 
         <!-- 表单容器 -->
         <div class="w-full">
@@ -140,6 +140,7 @@ import { LocaleDropdown } from '@/layout/components/LocaleDropdown'
 import { LoginStateEnum, useFormValid, useLoginState } from './components/useLogin'
 import LoginFormTitle from './components/LoginFormTitle.vue'
 import router from '@/router'
+import { useUserStoreWithOut } from '@/store/modules/user'
 
 // 导入背景图片
 import backgroundImage from '@/assets/imgs/background.png'
@@ -308,6 +309,11 @@ const tryLogin = async () => {
 
     const res = await LoginApi.socialLogin(type, code, state)
     authUtil.setToken(res)
+
+    // 设置用户信息标记为未设置，让路由守卫来处理
+    const userStore = useUserStoreWithOut()
+    userStore.resetState()
+
     router.push({ path: redirectUrl || '/' })
   } catch (err) {
     console.warn('社交登录失败，可继续使用普通登录', err)
@@ -349,6 +355,14 @@ $prefix-cls: #{$namespace}-login;
 .dark {
   .bg-white {
     background-color: #1f2937 !important;
+  }
+}
+
+// 错误提示改为文档流定位，避免与下方“记住我”行重叠（该行为紧凑布局使用了负 margin）
+.login-form {
+  :deep(.el-form-item__error) {
+    position: static;
+    padding-top: 2px;
   }
 }
 </style>

@@ -20,6 +20,7 @@ import cn.iocoder.sva.module.system.dal.mysql.role.DeptRoleMapper;
 import cn.iocoder.sva.module.system.dal.redis.RedisKeyConstants;
 import cn.iocoder.sva.module.system.enums.permission.DataScopeEnum;
 import cn.iocoder.sva.module.system.service.dept.DeptService;
+import cn.iocoder.sva.module.system.service.extlink.ExternalLinkRoleService;
 import cn.iocoder.sva.module.system.service.user.AdminUserService;
 import com.baomidou.dynamic.datasource.annotation.DSTransactional;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -65,6 +66,9 @@ public class PermissionServiceImpl implements PermissionService {
 
     @Resource
     private DeptRoleMapper deptRoleMapper;
+
+    @Resource
+    private ExternalLinkRoleService externalLinkRoleService;
 
     @Override
     public boolean hasAnyPermissions(Long userId, String... permissions) {
@@ -181,6 +185,8 @@ public class PermissionServiceImpl implements PermissionService {
         roleMenuMapper.deleteListByRoleId(roleId);
         // 标记删除 DeptRole
         deptRoleMapper.delete(new QueryWrapper<DeptRoleDO>().eq("role_id", roleId));
+        // 物理删除角色关联的外链权限，避免残留脏数据。注意：必须在角色删除后立即执行，否则关联数据会一直残留。
+        externalLinkRoleService.processRoleDeleted(roleId);
     }
 
     @Override
@@ -195,12 +201,16 @@ public class PermissionServiceImpl implements PermissionService {
             return Collections.emptySet();
         }
 
-        // 如果是管理员的情况下，获取全部菜单编号
+        // 如果是管理员的情况下，获取全部菜单编号。外链菜单本身也在全部菜单中，无需额外处理。
         if (roleService.hasAnySuperAdmin(roleIds)) {
             return convertSet(menuService.getMenuList(), MenuDO::getId);
         }
-        // 如果是非管理员的情况下，获得拥有的菜单编号
-        return convertSet(roleMenuMapper.selectListByRoleId(roleIds), RoleMenuDO::getMenuId);
+        // 如果是非管理员的情况下，获得拥有的菜单编号。注意：外链菜单的可见性仅由外链权限控制，
+        // 先从常规菜单权限中排除全部外链菜单，再按外链权限补回，保证取消/增加外链权限时菜单同步消失/出现。
+        Set<Long> menuIds = new HashSet<>(convertSet(roleMenuMapper.selectListByRoleId(roleIds), RoleMenuDO::getMenuId));
+        menuIds.removeAll(externalLinkRoleService.getAllLinkMenuIds());
+        menuIds.addAll(externalLinkRoleService.getLinkMenuIdsByRoleIds(roleIds));
+        return menuIds;
     }
 
     @Override
@@ -261,12 +271,12 @@ public class PermissionServiceImpl implements PermissionService {
     @Override
     public Set<Long> getLoginUserAllRoleIds(Long userId) {
         Set<Long> allRoleIds = new HashSet<>();
-        
+
         Set<Long> directRoleIds = getSelf().getUserRoleIdListByUserIdFromCache(userId);
         if (CollUtil.isNotEmpty(directRoleIds)) {
             allRoleIds.addAll(directRoleIds);
         }
-        
+
         AdminUserDO user = userService.getUser(userId);
         if (user != null && user.getDeptId() != null) {
             List<DeptRoleDO> deptRoleList = deptRoleMapper.selectList(
@@ -278,7 +288,7 @@ public class PermissionServiceImpl implements PermissionService {
                 allRoleIds.addAll(deptRoleIds);
             }
         }
-        
+
         return allRoleIds;
     }
 
@@ -293,11 +303,11 @@ public class PermissionServiceImpl implements PermissionService {
     List<RoleDO> getEnableUserRoleListByUserIdFromCache(Long userId) {
         // 获得用户拥有的所有角色编号（包含直接分配和部门角色）
         Set<Long> allRoleIds = getSelf().getLoginUserAllRoleIds(userId);
-        
+
         if (CollUtil.isEmpty(allRoleIds)) {
             return Collections.emptyList();
         }
-        
+
         // 获得角色数组，并移除被禁用的
         List<RoleDO> roles = roleService.getRoleListFromCache(allRoleIds);
         roles.removeIf(role -> !CommonStatusEnum.ENABLE.getStatus().equals(role.getStatus()));

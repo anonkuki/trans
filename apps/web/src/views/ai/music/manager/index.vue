@@ -10,20 +10,13 @@
       :inline="true"
       label-width="68px"
     >
-      <el-form-item label="用户编号" prop="userId">
-        <el-select
-          v-model="queryParams.userId"
+      <el-form-item label="用户名" prop="username">
+        <el-input
+          v-model="queryParams.username"
+          placeholder="请输入用户名"
           clearable
-          placeholder="请输入用户编号"
           class="!w-240px"
-        >
-          <el-option
-            v-for="item in userList"
-            :key="item.id"
-            :label="item.nickname"
-            :value="item.id"
-          />
-        </el-select>
+        />
       </el-form-item>
       <el-form-item label="音乐名称" prop="title">
         <el-input
@@ -102,11 +95,7 @@
     <el-table v-loading="loading" :data="list" :stripe="true" :show-overflow-tooltip="true">
       <el-table-column label="编号" align="center" prop="id" width="180" fixed="left" />
       <el-table-column label="音乐名称" align="center" prop="title" width="180px" fixed="left" />
-      <el-table-column label="用户" align="center" prop="userId" width="180">
-        <template #default="scope">
-          <span>{{ userList.find((item) => item.id === scope.row.userId)?.nickname }}</span>
-        </template>
-      </el-table-column>
+      <el-table-column label="用户" align="center" prop="userName" width="180" />
       <el-table-column label="音乐状态" align="center" prop="status" width="100">
         <template #default="scope">
           <dict-tag :type="DICT_TYPE.AI_MUSIC_STATUS" :value="scope.row.status" />
@@ -206,7 +195,6 @@
 import { getIntDictOptions, getBoolDictOptions, DICT_TYPE } from '@/utils/dict'
 import { dateFormatter } from '@/utils/formatTime'
 import { MusicApi, MusicVO } from '@/api/ai/music'
-import * as UserApi from '@/api/system/user'
 import { AiMusicStatusEnum } from '@/views/ai/utils/constants'
 
 /** AI 音乐 列表 */
@@ -221,7 +209,7 @@ const total = ref(0) // 列表的总页数
 const queryParams = reactive({
   pageNo: 1,
   pageSize: 10,
-  userId: undefined,
+  username: undefined,
   title: undefined,
   status: undefined,
   generateMode: undefined,
@@ -229,7 +217,6 @@ const queryParams = reactive({
   publicStatus: undefined
 })
 const queryFormRef = ref() // 搜索的表单
-const userList = ref<UserApi.UserVO[]>([]) // 用户列表
 
 /** 查询列表 */
 const getList = async () => {
@@ -288,7 +275,5 @@ const handleUpdatePublicStatusChange = async (row: MusicVO) => {
 /** 初始化 **/
 onMounted(async () => {
   getList()
-  // 获得用户列表
-  userList.value = await UserApi.getSimpleUserList()
 })
 </script>

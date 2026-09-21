@@ -16,6 +16,9 @@ public class AiImagePageReqVO extends PageParam {
     @Schema(description = "用户编号", example = "28987")
     private Long userId;
 
+    @Schema(description = "用户名", example = "admin")
+    private String username;
+
     @Schema(description = "平台", example = "OpenAI")
     private String platform;
 

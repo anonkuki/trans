@@ -19,6 +19,11 @@ public class OauthPropertiesConfig {
      */
     private FeiShu feishu;
 
+    /**
+     * 飞书日历
+     */
+    private Calendar calendar;
+
     @Data
     public static class FeiShu {
         /**
@@ -54,7 +59,7 @@ public class OauthPropertiesConfig {
         /**
          * ===================== 【新增】流式卡片相关 API =====================
          */
-        
+
         /**
          * 创建卡片实体的 URL
          */
@@ -79,6 +84,52 @@ public class OauthPropertiesConfig {
          * 飞书AI助手角色名称，默认：飞书AI助手
          */
         private String aiRoleName = "飞书AI助手";
+    }
+
+    @Data
+    public static class Calendar {
+        /**
+         * 飞书日历配置
+         */
+        private FeishuCalendar feishu;
+    }
+
+    @Data
+    public static class FeishuCalendar {
+        /**
+         * 应用 ID
+         */
+        private String clientId;
+
+        /**
+         * 应用密钥
+         */
+        private String clientSecret;
+
+        /**
+         * 获取授权码的 URL
+         */
+        private String getCode;
+
+        /**
+         * 回调地址
+         */
+        private String callback;
+
+        /**
+         * 获取用户访问令牌的 URL
+         */
+        private String userAccessTokenUrl;
+
+        /**
+         * 获取日历列表的 URL
+         */
+        private String getCalendarList;
+
+        /**
+         * 获取日历事件列表的 URL
+         */
+        private String getCalendarListItem;
     }
 
 }

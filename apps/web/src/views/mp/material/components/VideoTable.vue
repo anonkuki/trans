@@ -41,6 +41,7 @@
 <script lang="ts" setup>
 import WxVideoPlayer from '@/views/mp/components/wx-video-play'
 import { dateFormatter } from '@/utils/formatTime'
+import { processDownloadUrl } from '@/utils/downloadHelper'
 
 const props = defineProps<{
   list: any[]
@@ -54,6 +55,8 @@ const emit = defineEmits<{
 
 // 下载文件
 const handleDownload = (url: string) => {
-  window.open(url, '_blank')
+  // 处理下载URL：如果当前访问的是IP地址，则将下载链接的域名也替换为该IP
+  const processedUrl = processDownloadUrl(url)
+  window.open(processedUrl, '_blank')
 }
 </script>

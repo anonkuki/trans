@@ -34,7 +34,7 @@ public class TongYiChatModelTests {
 
     private final DashScopeChatModel chatModel = DashScopeChatModel.builder()
             .dashScopeApi(DashScopeApi.builder()
-                    .apiKey("test-key-not-configured")
+                    .apiKey("test-api-key")
                     .build())
             .defaultOptions(DashScopeChatOptions.builder()
 //                    .withModel("qwen1.5-72b-chat") // 模型
@@ -105,7 +105,7 @@ public class TongYiChatModelTests {
         // 准备环境
         RerankModel rerankModel = new DashScopeRerankModel(
                 DashScopeApi.builder()
-                        .apiKey("test-key-not-configured")
+                        .apiKey("test-api-key")
                         .build());
         // 准备参数
         String query = "spring";

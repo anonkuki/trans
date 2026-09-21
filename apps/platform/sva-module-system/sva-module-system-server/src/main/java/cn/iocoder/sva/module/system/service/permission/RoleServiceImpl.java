@@ -103,7 +103,7 @@ public class RoleServiceImpl implements RoleService {
             success = SYSTEM_ROLE_UPDATE_SUCCESS)
     public void updateRole(RoleSaveReqVO updateReqVO) {
         // 1.1 校验是否可以更新
-        RoleDO role = validateRoleForUpdate(updateReqVO.getId());
+        RoleDO role = validateRoleForUpdate(updateReqVO.getId(), updateReqVO.getFlag());
         // 1.2 校验角色的唯一字段是否重复
         validateRoleDuplicate(updateReqVO.getName(), updateReqVO.getCode(), updateReqVO.getId());
 
@@ -120,7 +120,7 @@ public class RoleServiceImpl implements RoleService {
     @CacheEvict(value = RedisKeyConstants.ROLE, key = "#id")
     public void updateRoleDataScope(Long id, Integer dataScope, Set<Long> dataScopeDeptIds) {
         // 校验是否可以更新
-        validateRoleForUpdate(id);
+        validateRoleForUpdate(id, false);
 
         // 更新数据范围
         RoleDO updateObject = new RoleDO();
@@ -152,9 +152,9 @@ public class RoleServiceImpl implements RoleService {
     @CacheEvict(value = RedisKeyConstants.ROLE, key = "#id")
     @LogRecord(type = SYSTEM_ROLE_TYPE, subType = SYSTEM_ROLE_DELETE_SUB_TYPE, bizNo = "{{#id}}",
             success = SYSTEM_ROLE_DELETE_SUCCESS)
-    public void deleteRole(Long id) {
+    public void deleteRole(Long id, Boolean isSuperAdmin) {
         // 1. 校验是否可以更新
-        RoleDO role = validateRoleForUpdate(id);
+        RoleDO role = validateRoleForUpdate(id, isSuperAdmin);
 
         // 2.1 标记删除
         roleMapper.deleteById(id);
@@ -167,9 +167,9 @@ public class RoleServiceImpl implements RoleService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void deleteRoleList(List<Long> ids) {
+    public void deleteRoleList(List<Long> ids, Boolean isSuperAdmin) {
         // 1. 校验是否可以删除
-        ids.forEach(this::validateRoleForUpdate);
+        ids.forEach(id -> this.validateRoleForUpdate(id, isSuperAdmin));
 
         // 2.1 标记删除
         roleMapper.deleteByIds(ids);
@@ -213,15 +213,16 @@ public class RoleServiceImpl implements RoleService {
      * 校验角色是否可以被更新
      *
      * @param id 角色编号
+     * @param isSuperAdmin 是否为超级管理员
      */
     @VisibleForTesting
-    RoleDO validateRoleForUpdate(Long id) {
+    RoleDO validateRoleForUpdate(Long id, Boolean isSuperAdmin) {
         RoleDO role = roleMapper.selectById(id);
         if (role == null) {
             throw exception(ROLE_NOT_EXISTS);
         }
-        // 内置角色，不允许删除
-        if (RoleTypeEnum.SYSTEM.getType().equals(role.getType())) {
+        // 内置角色，非超级管理员不允许操作
+        if (!isSuperAdmin && RoleTypeEnum.SYSTEM.getType().equals(role.getType())) {
             throw exception(ROLE_CAN_NOT_UPDATE_SYSTEM_TYPE_ROLE);
         }
         return role;

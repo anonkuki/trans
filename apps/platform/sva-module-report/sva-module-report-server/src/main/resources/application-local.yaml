@@ -67,9 +67,9 @@ spring:
           username: root
           password: ${SVA_CONFIG_PASSWORD:}
         #          username: sa # SQL Server 连接的示例
-        #          password: JSm:g(*%lU4ZAkz06cd52KqT3)i1?H7W # SQL Server 连接的示例
+        #          password: ${SVA_CONFIG_PASSWORD:}# SQL Server 连接的示例
         #          username: SYSDBA # DM 连接的示例
-        #          password: SYSDBA # DM 连接的示例
+        #          password: ${SVA_CONFIG_PASSWORD:}# DM 连接的示例
         slave: # 模拟从库，可根据自己需要修改
           lazy: true # 开启懒加载，保证启动速度
           url: jdbc:mysql://127.0.0.1:3306/ruoyi-vue-pro?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&nullCatalogMeansCurrent=true&rewriteBatchedStatements=true

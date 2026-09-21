@@ -4,6 +4,7 @@ import request from '@/config/axios'
 export interface MusicVO {
   id: number // 编号
   userId: number // 用户编号
+  userName: string // 用户昵称
   title: string // 音乐名称
   lyric: string // 歌词
   imageUrl: string // 图片地址

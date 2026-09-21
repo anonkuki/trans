@@ -102,6 +102,7 @@ public interface DocxTranslationService {
      * @param strictFormat      是否保持严格格式
      * @param enableQc          是否启用 QC
      * @param enableComparison  是否启用对照模式
+     * @param translationFirst  译文前置（仅双语对照模式有效，true=译文在原文前）
      * @return 翻译结果
      */
     TranslationResult processDocument(
@@ -114,7 +115,8 @@ public interface DocxTranslationService {
             TextCallback textCallback,
             boolean strictFormat,
             boolean enableQc,
-            boolean enableComparison
+            boolean enableComparison,
+            boolean translationFirst
     );
 
     /**
@@ -122,6 +124,6 @@ public interface DocxTranslationService {
      */
     default TranslationResult processDocument(String inputPath, String outputPath, String targetLanguage) {
         return processDocument(inputPath, outputPath, targetLanguage,
-                true, null, null, null, false, false, false);
+                true, null, null, null, false, false, false, false);
     }
 }

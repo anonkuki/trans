@@ -26,7 +26,7 @@ public class DifyTest {
     public void test() throws Exception {
 
         String baseUrl = "https://xx.ai";
-        String apiKey = "xx";
+        String apiKey = "test-credential";
         String user = "zhangsan";
         Map<String, Object> inputs = Map.of(
                 "input", "请写一个java程序，实现一个方法，输入一个字符串，返回字符串的长度。"

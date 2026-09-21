@@ -38,6 +38,12 @@ export const TranApi = {
     return await request.get({ url: '/ai/tran/glossary/visible-list', params })
   },
 
+  // 获取可编辑术语库列表
+  getEditableGlossaryList: async (targetLanguage?: string) => {
+    const params = targetLanguage ? { targetLanguage } : {}
+    return await request.get({ url: '/ai/tran/glossary/editable-list', params })
+  },
+
   // 获取模型列表
   getModelSimpleList: async (type?: number) => {
     const params = type !== undefined ? { type } : {}
@@ -67,7 +73,8 @@ export const TranApi = {
     strictFormat: boolean
     enableComparison: boolean
     enableQc: boolean
-    glossaryId?: number | null
+    translationFirst: boolean
+    glossaryIds?: number[] | null  // 改为数组，支持多选
     modelId?: number | null
     roleId?: number | null
     disableCache?: number
@@ -79,7 +86,8 @@ export const TranApi = {
       strictFormat: data.strictFormat,
       enableComparison: data.enableComparison,
       enableQc: data.enableQc,
-      glossaryId: data.glossaryId,
+      translationFirst: data.translationFirst,
+      glossaryIds: data.glossaryIds,  // 传递术语库ID数组
       modelId: data.modelId,
       roleId: data.roleId,
       disableCache: data.disableCache
@@ -91,47 +99,10 @@ export const TranApi = {
     return await request.get({ url: `/ai/tran/task/${taskId}` })
   },
 
-  // 下载翻译结果（使用 MinIO URL）
-  downloadFile: async (taskId: string, type: string) => {
-    try {
-      // 先获取任务信息，包含 MinIO URL
-      const taskRes = await request.get({ url: `/ai/tran/task/${taskId}` })
-      const taskData = taskRes.data || taskRes
-      
-      if (!taskData.minioUrls || !taskData.minioUrls[type]) {
-        throw new Error(`文件类型 ${type} 的下载链接不存在`)
-      }
-      
-      const minioUrl = taskData.minioUrls[type]
-      
-      // 使用 fetch 下载文件
-      const response = await fetch(minioUrl)
-      if (!response.ok) {
-        throw new Error(`下载失败: ${response.status}`)
-      }
-      
-      const blob = await response.blob()
-      const blobUrl = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = blobUrl
-      
-      // 设置文件名
-      let filename = `download_${type}_${taskId}`
-      if (type === 'file') {
-        filename = taskData.downloads?.file?.filename || filename
-      } else if (type === 'excel') {
-        filename = taskData.downloads?.excel?.filename || filename
-      } else if (type === 'qc') {
-        filename = taskData.downloads?.qc?.filename || filename
-      }
-      
-      a.download = filename
-      a.click()
-      URL.revokeObjectURL(blobUrl)
-      
-    } catch (error) {
-      console.error('下载文件失败:', error)
-      throw error
-    }
+  // 下载翻译结果（通过后端接口，避免前端直接请求 MinIO 导致文件名中的特殊字符被编码）
+  downloadFile: async (taskId: string, type: string): Promise<Blob> => {
+    // 通过后端下载接口，后端生成预签名 URL 并 302 重定向到 MinIO
+    // axios 自动跟随重定向，最终拿到文件 blob
+    return await request.download({ url: `/ai/tran/download/${taskId}/${type}` })
   }
 }

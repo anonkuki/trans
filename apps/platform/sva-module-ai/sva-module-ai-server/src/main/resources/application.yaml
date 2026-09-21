@@ -18,7 +18,7 @@ spring:
   servlet:
     # 文件上传相关配置项
     multipart:
-      max-file-size: ${TRANSDOC_MAX_FILE_SIZE:50MB} # 与内部 OCR 接口默认上限保持一致
+      max-file-size: ${TRANSDOC_MAX_FILE_SIZE:50MB}
       max-request-size: ${TRANSDOC_MAX_REQUEST_SIZE:55MB}
 
   # Jackson 配置项
@@ -99,7 +99,7 @@ xxl:
     executor:
       appname: ${spring.application.name} # 执行器 AppName
       logpath: ${user.home}/logs/xxl-job/${spring.application.name} # 执行器运行日志文件存储磁盘路径
-    accessToken: default_token # 执行器通讯TOKEN
+    accessToken: ${XXL_JOB_ACCESS_TOKEN:} # 执行器通讯TOKEN
 
 --- #################### AI 相关配置 ####################
 
@@ -222,14 +222,6 @@ sva:
 
 --- #################### 科兴相关配置 ####################
 
-transdoc:
-  pdf-convert-mode: ${TRANSDOC_PDF_CONVERT_MODE:1}
-  python-recognize-url: ${TRANSDOC_PYTHON_RECOGNIZE_URL:http://127.0.0.1:8030/internal/v1/ocr/recognize}
-  python-internal-token: ${TRANSDOC_PYTHON_INTERNAL_TOKEN:}
-  python-connect-timeout: ${TRANSDOC_PYTHON_CONNECT_TIMEOUT:10s}
-  python-read-timeout: ${TRANSDOC_PYTHON_READ_TIMEOUT:31m}
-  temp-dir: ${TRANSDOC_TEMP_DIR:D:/Temp/trans-platform}
-
 sva:
   info:
     version: 1.0.0
@@ -247,5 +239,14 @@ sva:
     version: ${sva.info.version}
   tenant: # 多租户相关配置项
     enable: false
+
+transdoc:
+  pdf-convert-mode: ${TRANSDOC_PDF_CONVERT_MODE:1}
+  python-recognize-url: ${TRANSDOC_PYTHON_RECOGNIZE_URL:http://127.0.0.1:8030/internal/v1/ocr/recognize}
+  python-internal-token: ${TRANSDOC_PYTHON_INTERNAL_TOKEN:}
+  python-connect-timeout: ${TRANSDOC_PYTHON_CONNECT_TIMEOUT:10s}
+  python-read-timeout: ${TRANSDOC_PYTHON_READ_TIMEOUT:31m}
+  python-fallback-enabled: ${TRANSDOC_PYTHON_FALLBACK_ENABLED:false}
+  temp-dir: ${TRANSDOC_TEMP_DIR:D:/Temp/trans-platform}
 
 debug: false

@@ -3,6 +3,8 @@ package cn.iocoder.sva.module.ai.service.translation.tran;
 import cn.iocoder.sva.module.ai.service.translation.tran.model.UsageStats;
 import org.springframework.ai.chat.model.ChatModel;
 
+import java.util.Map;
+
 /**
  * LLM客户端服务接口
  * <p>
@@ -143,4 +145,17 @@ public interface LlmClientService {
      * @return 新的 LlmClientService 实例
      */
     LlmClientService withChatModel(ChatModel chatModel);
+
+    /**
+     * 术语约束翻译模式
+     * <p>
+     * 发送纯净中文原文 + 术语表，让大模型在理解句意后使用术语
+     *
+     * @param text           待翻译文本（纯净中文，不做术语替换）
+     * @param targetLanguage 目标语言
+     * @param glossaryMap    术语映射表（key=中文术语, value=英文术语）
+     * @return 翻译结果
+     */
+    TranslateResult translateWithGlossaryConstraint(String text, String targetLanguage,
+                                                     Map<String, String> glossaryMap);
 }

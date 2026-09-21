@@ -1,7 +1,13 @@
 package cn.iocoder.sva.module.system.service.auth;
 
+import cn.hutool.core.codec.Base64;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.crypto.SecureUtil;
+import cn.hutool.crypto.asymmetric.KeyType;
+import cn.hutool.crypto.asymmetric.RSA;
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import cn.iocoder.sva.framework.common.enums.CommonStatusEnum;
 import cn.iocoder.sva.framework.common.enums.UserTypeEnum;
 import cn.iocoder.sva.framework.common.util.monitor.TracerUtils;
@@ -9,6 +15,7 @@ import cn.iocoder.sva.framework.common.util.object.BeanUtils;
 import cn.iocoder.sva.framework.common.util.servlet.ServletUtils;
 import cn.iocoder.sva.framework.common.util.validation.ValidationUtils;
 import cn.iocoder.sva.framework.datapermission.core.annotation.DataPermission;
+import cn.iocoder.sva.module.infra.api.config.ConfigApi;
 import cn.iocoder.sva.module.system.api.logger.dto.LoginLogCreateReqDTO;
 import cn.iocoder.sva.module.system.api.sms.SmsCodeApi;
 import cn.iocoder.sva.module.system.api.sms.dto.code.SmsCodeUseReqDTO;
@@ -50,6 +57,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
+import java.security.KeyFactory;
+import java.security.PublicKey;
+import java.security.interfaces.RSAPrivateCrtKey;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.RSAPublicKeySpec;
 import java.util.*;
 
 import static cn.iocoder.sva.framework.common.exception.util.ServiceExceptionUtil.exception;
@@ -96,6 +108,9 @@ public class AdminAuthServiceImpl implements AdminAuthService {
     @Resource
     private RestTemplate restTemplate;
 
+    @Resource
+    private ConfigApi configApi;
+
     /**
      * 验证码的开关，默认为 true
      */
@@ -141,7 +156,7 @@ public class AdminAuthServiceImpl implements AdminAuthService {
             createLoginLog(user.getId(), username, logTypeEnum, LoginResultEnum.USER_DISABLED);
             throw exception(AUTH_LOGIN_USER_DISABLED);
         }
-        
+
         // 根据密码验证模式进行密码校验
         if (passwordMode == 0) {
             // 纯数据库模式：所有用户都使用数据库密码验证
@@ -444,6 +459,149 @@ public class AdminAuthServiceImpl implements AdminAuthService {
         } catch (Exception e) {
             log.info("飞书免登失败", e);
             throw exception(AUTH_THIRD_LOGIN_NOT_BIND);
+        }
+    }
+
+    // ========== 新增：外部系统单点登录（RSA 密文直接登录） ==========
+    @Override
+    public AuthLoginRespVO ssoLogin(String data) {
+        // 旧协议只有加密、没有可信签名；任何取得公钥的人都能伪造 staffId。
+        // 服务层同样强制关闭，防止未来从其他 Controller 绕过入口保护。
+        throw exception(AUTH_SSO_PARAM_ERROR);
+    }
+
+    /**
+     * 仅保留用于迁移时理解旧协议，禁止从业务入口调用。
+     */
+    @Deprecated(forRemoval = true)
+    private AuthLoginRespVO legacyInsecureSsoLogin(String data) {
+        // 1. 从参数配置获取 RSA 私钥（配置管理页面，参数键名 login.private）
+        String privateKey = configApi.getConfigValueByKey(SSO_LOGIN_PRIVATE_KEY).getCheckedData();
+        if (StrUtil.isBlank(privateKey)) {
+            throw exception(AUTH_SSO_CONFIG_ERROR, SSO_LOGIN_PRIVATE_KEY);
+        }
+
+        // 2. 使用 RSA 解密，得到明文 JSON。
+        // 先按标准模式（公钥加密、私钥解密）；对方实际协议是"私钥加密"，失败时回退为用派生公钥反向解密
+        String plainText;
+        try {
+            RSA rsa = SecureUtil.rsa(cleanPemKey(privateKey), null);
+            plainText = rsa.decryptStr(data, KeyType.PrivateKey);
+        } catch (Exception ex) {
+            try {
+                plainText = decryptByPublicKey(privateKey, data);
+                log.info("[ssoLogin][密文为对方私钥加密，已用配对公钥反向解密成功]");
+            } catch (Exception ex2) {
+                // 两种模式都失败，输出密钥自检信息，方便定位是私钥配置问题还是密文不匹配问题
+                logRsaDiagnostics(privateKey);
+                log.error("[ssoLogin][RSA 解密失败，密文 Base64 长度：{}]", data != null ? data.length() : 0, ex);
+                throw exception(AUTH_SSO_DECRYPT_ERROR);
+            }
+        }
+
+        // 3. 解析明文，获取登录账号 staffId 与时间戳 timeStamp
+        JSONObject json;
+        try {
+            json = JSONUtil.parseObj(plainText);
+        } catch (Exception ex) {
+            log.error("[ssoLogin][解密内容解析失败]", ex);
+            throw exception(AUTH_SSO_DECRYPT_ERROR);
+        }
+        String staffId = json.getStr("staffId");
+        if (StrUtil.isBlank(staffId)) {
+            throw exception(AUTH_SSO_DECRYPT_ERROR);
+        }
+
+        // 3.1 校验登录凭证：报文中缺少 timeStamp 时拒绝登录；当前时间超过 timeStamp 则视为过期（兼容秒/毫秒、数字/字符串）
+        String timeStamp = json.getStr("timeStamp");
+        if (StrUtil.isBlank(timeStamp)) {
+            log.info("[ssoLogin][接收的参数缺少 timeStamp，拒绝登录，info：{}]", plainText);
+            throw exception(AUTH_SSO_PARAM_ERROR);
+        }
+        validateSsoTimestamp(timeStamp);
+
+        // 4. 校验用户存在且未被禁用
+        AdminUserDO user = userService.getUserByUsername(staffId);
+        if (user == null) {
+            createLoginLog(null, staffId, LoginLogTypeEnum.LOGIN_SOCIAL, LoginResultEnum.BAD_CREDENTIALS);
+            throw exception(USER_NOT_EXISTS);
+        }
+        if (CommonStatusEnum.isDisable(user.getStatus())) {
+            createLoginLog(user.getId(), staffId, LoginLogTypeEnum.LOGIN_SOCIAL, LoginResultEnum.USER_DISABLED);
+            throw exception(AUTH_LOGIN_USER_DISABLED);
+        }
+
+        // 5. 直接创建 Token 令牌，记录登录日志（无需密码校验）
+        return createTokenAfterLoginSuccess(user.getId(), user.getUsername(), LoginLogTypeEnum.LOGIN_SOCIAL);
+    }
+
+    /**
+     * 清理私钥内容：兼容带 PEM 头尾、换行的密钥格式，只保留 Base64 主体
+     */
+    private static String cleanPemKey(String key) {
+        return key.replaceAll("-----[A-Z ]+-----", "").replaceAll("\\s+", "");
+    }
+
+    /**
+     * 对方"私钥加密"协议的反向解密：从私钥（CRT 结构）派生出配对公钥，用公钥还原密文。
+     */
+    private String decryptByPublicKey(String privateKey, String data) throws Exception {
+        java.security.PrivateKey pk = KeyFactory.getInstance("RSA")
+                .generatePrivate(new PKCS8EncodedKeySpec(Base64.decode(cleanPemKey(privateKey))));
+        RSAPrivateCrtKey crt = (RSAPrivateCrtKey) pk;
+        PublicKey publicKey = KeyFactory.getInstance("RSA")
+                .generatePublic(new RSAPublicKeySpec(crt.getModulus(), crt.getPublicExponent()));
+        javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("RSA/ECB/PKCS1Padding");
+        cipher.init(javax.crypto.Cipher.DECRYPT_MODE, publicKey);
+        return new String(cipher.doFinal(Base64.decode(data)), java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /**
+     * 校验 SSO 登录凭证的时间戳有效期：当前时间超过 timeStamp 则视为登录已过期。
+     * 兼容秒（10 位）与毫秒（13 位）两种精度，数字或字符串均可。
+     */
+    private void validateSsoTimestamp(String timeStamp) {
+        long ts;
+        try {
+            ts = Long.parseLong(timeStamp.trim());
+        } catch (NumberFormatException ex) {
+            log.error("[ssoLogin][timeStamp 格式不正确：{}]", timeStamp);
+            throw exception(AUTH_SSO_PARAM_ERROR);
+        }
+        // 自动识别秒/毫秒：小于阈值（12 位以下）视为秒级时间戳，转换为毫秒后再比较。
+        // 参考：2001-09-09 之后秒级时间戳为 10 位（约 10 亿量级），毫秒级为 13 位（约万亿量级）
+        if (ts < 100_000_000_000L) {
+            ts *= 1000L;
+        }
+        long now = System.currentTimeMillis();
+        if (now > ts) {
+            log.warn("[ssoLogin][登录凭证已过期，timeStamp：{}，当前时间：{}]", ts, now);
+            throw exception(AUTH_SSO_EXPIRED);
+        }
+    }
+
+    /**
+     * RSA 解密失败时的密钥自检：解析私钥并从其模数/公钥指数派生出公钥，做一次自加密自解密。
+     * 自检通过 → 私钥本身可用，问题在对方密文（加密用的公钥与配置的私钥不配对）；自检失败 → 私钥配置有误。
+     */
+    private void logRsaDiagnostics(String privateKey) {
+        try {
+            java.security.PrivateKey pk = KeyFactory.getInstance("RSA")
+                    .generatePrivate(new PKCS8EncodedKeySpec(Base64.decode(cleanPemKey(privateKey))));
+            int keyBitSize = ((java.security.interfaces.RSAPrivateKey) pk).getModulus().bitLength();
+            log.warn("[ssoLogin][密钥自检] 私钥解析成功，位数：{} bit", keyBitSize);
+            if (pk instanceof RSAPrivateCrtKey crt) {
+                // 私钥（CRT 结构）中包含模数和公钥指数，可派生出配对的公钥
+                PublicKey publicKey = KeyFactory.getInstance("RSA")
+                        .generatePublic(new RSAPublicKeySpec(crt.getModulus(), crt.getPublicExponent()));
+                RSA rsa = SecureUtil.rsa(cleanPemKey(privateKey), Base64.encode(publicKey.getEncoded()));
+                String test = rsa.encryptBase64("sso-key-check", KeyType.PublicKey);
+                String decrypted = rsa.decryptStr(test, KeyType.PrivateKey);
+                log.warn("[ssoLogin][密钥自检] 自加密自解密{}，私钥本身可用；解密外部密文仍失败说明对方加密用的公钥与该私钥不配对",
+                        "sso-key-check".equals(decrypted) ? "成功" : "结果不一致");
+            }
+        } catch (Exception e) {
+            log.error("[ssoLogin][密钥自检失败，说明配置的私钥不可用（格式错误或损坏）]", e);
         }
     }
 

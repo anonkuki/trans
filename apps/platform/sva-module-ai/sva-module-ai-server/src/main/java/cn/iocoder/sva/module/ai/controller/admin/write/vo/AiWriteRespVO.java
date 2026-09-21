@@ -15,6 +15,9 @@ public class AiWriteRespVO {
     @Schema(description = "用户编号", requiredMode = Schema.RequiredMode.REQUIRED, example = "28404")
     private Long userId;
 
+    @Schema(description = "用户昵称", example = "张三")
+    private String userName;
+
     @Schema(description = "写作类型", example = "1")
     private Integer type;
 

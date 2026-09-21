@@ -58,6 +58,7 @@ public interface PdfTranslationService {
      * @param strictFormat      是否严格保留格式
      * @param enableQc          是否启用 QC
      * @param enableComparison  是否启用双语对照
+     * @param translationFirst  译文前置（仅双语对照模式有效）
      * @return 翻译结果
      */
     PdfResult processPdf(
@@ -70,13 +71,14 @@ public interface PdfTranslationService {
             TextCallback textCallback,
             boolean strictFormat,
             boolean enableQc,
-            boolean enableComparison
+            boolean enableComparison,
+            boolean translationFirst
     );
 
     /**
      * 翻译 PDF 文档（使用默认参数）
      */
     default PdfResult processPdf(String inputPath, String outputPath, String targetLanguage) {
-        return processPdf(inputPath, outputPath, targetLanguage, true, null, null, null, false, false, false);
+        return processPdf(inputPath, outputPath, targetLanguage, true, null, null, null, false, false, false, false);
     }
 }

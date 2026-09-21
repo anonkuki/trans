@@ -63,9 +63,35 @@ public class TranController {
         // 从安全上下文获取当前登录用户的ID和用户名
         Long userId = SecurityFrameworkUtils.getLoginUserId();
         String username = SecurityFrameworkUtils.getLoginUserUsername();
-        
+
         // 调用 Service 层查询可见术语库列表
         List<TranGlossaryDO> glossaryList = tranService.getVisibleGlossaryList(userId, username, targetLanguage);
+        return success(glossaryList);
+    }
+
+    /**
+     * 获取当前登录用户可编辑的术语库列表
+     * <p>
+     * 只返回用户有权限修改的术语库：
+     * - 超级管理员：所有术语库
+     * - 普通用户：自己创建的术语库 + 所属角色的术语库（roleId匹配）
+     * <p>
+     * 注意：不包含仅可见但不可修改的术语库（roleShow匹配但不属于用户角色的）
+     *
+     * @param targetLanguage 目标语言（如 "en" 表示英文）
+     * @return 可编辑的术语库列表
+     */
+    @GetMapping("/glossary/editable-list")
+    @Operation(summary = "获取当前登录用户可编辑的术语库列表")
+    public CommonResult<List<TranGlossaryDO>> getEditableGlossaryList(
+            @Parameter(description = "目标语言", example = "en", required = true)
+            @RequestParam("targetLanguage") String targetLanguage) {
+        // 从安全上下文获取当前登录用户的ID和用户名
+        Long userId = SecurityFrameworkUtils.getLoginUserId();
+        String username = SecurityFrameworkUtils.getLoginUserUsername();
+
+        // 调用 Service 层查询可编辑术语库列表
+        List<TranGlossaryDO> glossaryList = tranService.getEditableGlossaryList(userId, username, targetLanguage);
         return success(glossaryList);
     }
 
@@ -84,7 +110,7 @@ public class TranController {
     @Operation(summary = "保存术语到术语库")
     public CommonResult<Map<String, Object>> saveTerms(
             @RequestBody Map<String, String> terms,
-            @Parameter(description = "术语库ID", required = true) 
+            @Parameter(description = "术语库ID", required = true)
             @RequestParam("glossaryId") Long glossaryId) {
         // 从安全上下文获取当前登录用户名
         String username = SecurityFrameworkUtils.getLoginUserUsername();
@@ -127,7 +153,7 @@ public class TranController {
      *
      * @param file 待翻译的文件
      * @param targetLang 目标语言（如 "en"）
-     * @param glossaryId 术语库ID（可选）
+     * @param glossaryIds 术语库ID列表（可选，支持多选）
      * @param useGlossaryReplace 是否使用术语替换
      * @param strictFormat 是否严格保持格式
      * @param enableComparison 是否启用双语对照
@@ -142,11 +168,12 @@ public class TranController {
     public CommonResult<Map<String, String>> translate(
             @Parameter(description = "翻译文件") @RequestParam("file") MultipartFile file,
             @Parameter(description = "目标语言") @RequestParam("targetLang") String targetLang,
-            @Parameter(description = "术语库ID") @RequestParam(value = "glossaryId", required = false) Long glossaryId,
+            @Parameter(description = "术语库ID列表") @RequestParam(value = "glossaryIds", required = false) List<Long> glossaryIds,
             @Parameter(description = "是否使用术语替换") @RequestParam(value = "useGlossaryReplace", defaultValue = "false") boolean useGlossaryReplace,
             @Parameter(description = "是否严格格式") @RequestParam(value = "strictFormat", defaultValue = "false") boolean strictFormat,
             @Parameter(description = "是否启用对照") @RequestParam(value = "enableComparison", defaultValue = "false") boolean enableComparison,
             @Parameter(description = "是否启用质检") @RequestParam(value = "enableQc", defaultValue = "false") boolean enableQc,
+            @Parameter(description = "是否译文前置（仅双语对照模式有效）") @RequestParam(value = "translationFirst", defaultValue = "false") boolean translationFirst,
             @Parameter(description = "AI模型ID") @RequestParam(value = "modelId", required = false) Long modelId,
             @Parameter(description = "是否禁用缓存（1=禁用，0=启用）") @RequestParam(value = "disableCache", defaultValue = "0") Integer disableCache,
             @Parameter(description = "聊天角色ID") @RequestParam(value = "roleId", required = false) Long roleId) {
@@ -163,11 +190,12 @@ public class TranController {
         TranTranslateReqVO reqVO = new TranTranslateReqVO();
         reqVO.setFile(file);
         reqVO.setTargetLang(targetLang);
-        reqVO.setGlossaryId(glossaryId);
+        reqVO.setGlossaryIds(glossaryIds);  // 设置术语库ID列表
         reqVO.setUseGlossaryReplace(useGlossaryReplace);
         reqVO.setStrictFormat(strictFormat);
         reqVO.setEnableComparison(enableComparison);
         reqVO.setEnableQc(enableQc);
+        reqVO.setTranslationFirst(translationFirst);
         reqVO.setModelId(modelId);
         reqVO.setDisableCache(disableCache);
         reqVO.setRoleId(roleId);

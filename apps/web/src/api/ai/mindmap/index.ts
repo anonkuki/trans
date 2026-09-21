@@ -7,6 +7,7 @@ import request from '@/config/axios' // AI 思维导图 VO
 export interface MindMapVO {
   id: number // 编号
   userId: number // 用户编号
+  userName: string // 用户昵称
   prompt: string // 生成内容提示
   generatedContent: string // 生成的思维导图内容
   platform: string // 平台

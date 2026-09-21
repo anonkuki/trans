@@ -94,4 +94,12 @@ public interface FileService {
      */
     byte[] getFileContent(Long configId, String path) throws Exception;
 
+    /**
+     * 根据文件 URL 获取文件内容（从文件存储器直接读取）
+     *
+     * @param url 文件完整 URL
+     * @return 文件内容字节数组
+     */
+    byte[] getFileContentByUrl(String url) throws Exception;
+
 }

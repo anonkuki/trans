@@ -17,6 +17,15 @@
           class="!w-240px"
         />
       </el-form-item>
+      <el-form-item label="工号" prop="username" v-hasRole="['super_admin']">
+        <el-input
+          v-model="queryParams.username"
+          placeholder="请输入工号"
+          clearable
+          @keyup.enter="handleQuery"
+          class="!w-240px"
+        />
+      </el-form-item>
       <el-form-item label="创建时间" prop="createTime">
         <el-date-picker
           v-model="queryParams.createTime"
@@ -103,7 +112,7 @@
             v-if="scope.row.sourceFileUrl"
             link
             type="primary"
-            @click="downloadByUrl(scope.row.sourceFileUrl, scope.row.fileName, '_原文档')"
+            @click="handleDownload(scope.row, 'source')"
           >
             原文件
           </el-button>
@@ -111,7 +120,7 @@
             v-if="scope.row.compareFileUrl"
             link
             type="success"
-            @click="downloadByUrl(scope.row.compareFileUrl, scope.row.fileName, '_对照表')"
+            @click="handleDownload(scope.row, 'compare')"
           >
             对照表
           </el-button>
@@ -119,7 +128,7 @@
             v-if="scope.row.qcFileUrl"
             link
             type="warning"
-            @click="downloadByUrl(scope.row.qcFileUrl, scope.row.fileName, '_QC报告')"
+            @click="handleDownload(scope.row, 'qc')"
           >
             QC报告
           </el-button>
@@ -127,7 +136,7 @@
             v-if="scope.row.contrastFileUrl"
             link
             type="success"
-            @click="downloadByUrl(scope.row.contrastFileUrl, scope.row.fileName, '_双语版')"
+            @click="handleDownload(scope.row, 'contrast')"
           >
             双语版
           </el-button>
@@ -183,6 +192,7 @@ const queryParams = reactive({
   pageNo: 1,
   pageSize: 10,
   fileName: undefined,
+  username: undefined,
   createTime: []
 })
 const queryFormRef = ref() // 搜索的表单
@@ -218,37 +228,41 @@ const openForm = (type: string, id?: number) => {
   formRef.value.open(type, id)
 }
 
-/** 文件下载 */
-const handleDownload = (row: TranFile) => {
-  if (row.fileUrl) {
-    downloadByUrl(row.fileUrl, row.fileName || '未命名文件', '_译文')
-  }
-}
+/** 文件下载（通过后端接口，避免前端直接请求 MinIO 导致文件名特殊字符被编码） */
+const handleDownload = async (row: TranFile, type: string = 'file') => {
+  if (!row.id) return
+  try {
+    const blob = await TranFileApi.downloadFile(row.id, type)
 
-/** 通过URL下载文件 */
-const downloadByUrl = (url: string, fileName: string, suffix?: string) => {
-  if (!url) return
-  // 清理文件名：去除_strict和时间戳
-  let cleanName = fileName
-    .replace(/_strict/g, '')
-    .replace(/_\d{10,}/g, '')
-  // 从URL中提取文件扩展名
-  const urlExtMatch = url.match(/\.([^./]+)$/)
-  const ext = urlExtMatch ? '.' + urlExtMatch[1] : ''
-  const nameWithoutExt = cleanName.replace(/\.[^.]+$/, '')
-  // 添加后缀到名称后面、扩展名前面
-  const finalName = suffix ? nameWithoutExt + suffix + ext : cleanName
-  // 统一使用blob方式强制下载，确保文件名生效
-  fetch(url)
-    .then(res => res.blob())
-    .then(blob => {
-      const blobUrl = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = blobUrl
-      a.download = finalName
-      a.click()
-      URL.revokeObjectURL(blobUrl)
-    })
+    // 根据文件类型生成下载文件名
+    let cleanName = (row.fileName || '未命名文件')
+      .replace(/_strict/g, '')
+      .replace(/_\d{10,}/g, '')
+    const ext = cleanName.includes('.') ? '.' + cleanName.split('.').pop() : ''
+    const nameWithoutExt = cleanName.replace(/\.[^.]+$/, '')
+
+    // 译文和双语版的输出扩展名：xlsx/xlsm 翻译后仍为 xlsx，pdf 翻译后转为 docx，docx 保持不变
+    const outputExt = ext.toLowerCase() === '.pdf' ? '.docx' : ext
+
+    let finalName: string
+    switch (type) {
+      case 'source': finalName = nameWithoutExt + '_原文档' + ext; break // 原文件保持原始格式
+      case 'compare': finalName = nameWithoutExt + '_对照表.xlsx'; break // 对照表固定为 xlsx 格式
+      case 'qc': finalName = nameWithoutExt + '_QC报告.txt'; break // QC报告固定为 txt 格式
+      case 'contrast': finalName = nameWithoutExt + '_双语版' + outputExt; break // 双语版：xlsx→xlsx, docx→docx, pdf→docx
+      default: finalName = nameWithoutExt + '_译文' + outputExt // 译文：xlsx→xlsx, docx→docx, pdf→docx
+    }
+
+    const blobUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl
+    a.download = finalName
+    a.click()
+    URL.revokeObjectURL(blobUrl)
+  } catch (e) {
+    console.error('下载失败:', e)
+    message.error('下载失败')
+  }
 }
 
 /** 删除按钮操作 */

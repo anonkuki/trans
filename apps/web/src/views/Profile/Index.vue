@@ -15,7 +15,7 @@
           <el-tab-pane :label="t('profile.info.basicInfo')" name="basicInfo">
             <BasicInfo @success="handleBasicInfoSuccess" />
           </el-tab-pane>
-          <el-tab-pane :label="t('profile.info.resetPwd')" name="resetPwd">
+          <el-tab-pane v-if="isSuperAdmin" :label="t('profile.info.resetPwd')" name="resetPwd">
             <ResetPwd />
           </el-tab-pane>
           <el-tab-pane :label="t('profile.info.userSocial')" name="userSocial">
@@ -28,11 +28,18 @@
 </template>
 <script lang="ts" setup>
 import { BasicInfo, ProfileUser, ResetPwd, UserSocial } from './components'
+import { useUserStore } from '@/store/modules/user'
 
 const { t } = useI18n()
 defineOptions({ name: 'Profile' })
 const activeName = ref('basicInfo')
 const profileUserRef = ref()
+const userStore = useUserStore()
+
+// 判断是否是超级管理员
+const isSuperAdmin = computed(() => {
+  return userStore.roles.includes('super_admin')
+})
 
 // 处理基本信息更新成功
 const handleBasicInfoSuccess = async () => {

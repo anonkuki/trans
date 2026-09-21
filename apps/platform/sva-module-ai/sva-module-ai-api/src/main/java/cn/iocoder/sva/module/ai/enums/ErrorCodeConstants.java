@@ -77,4 +77,10 @@ public interface ErrorCodeConstants {
     ErrorCode TRAN_FILE_NOT_EXISTS = new ErrorCode(1_040_032_001, "AI翻译文件信息不存在");
     ErrorCode CHATBOT_FILE_NOT_EXISTS = new ErrorCode( 1_040_032_002, "对话文件记录不存在");
 
+    ErrorCode CALENDAR_NOT_EXISTS = new ErrorCode(1_040_033_002, "日程导出不存在");
+
+    // ========== AI 词句翻译 1-040-034-000 ==========
+    ErrorCode TRAN_TEXT_HISTORY_NOT_EXISTS = new ErrorCode(1_040_034_001, "词句翻译历史记录不存在");
+    ErrorCode TRAN_TEXT_TRANSLATE_FAILED = new ErrorCode(1_040_034_002, "词句翻译失败：{}");
+
 }

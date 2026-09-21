@@ -57,7 +57,7 @@ def _startup() -> None:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "work_root": settings.work_root}
+    return {"status": "ok"}
 
 
 @app.post("/normalize")

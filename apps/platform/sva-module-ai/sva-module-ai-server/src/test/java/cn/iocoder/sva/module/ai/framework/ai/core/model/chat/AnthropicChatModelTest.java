@@ -24,7 +24,7 @@ public class AnthropicChatModelTest {
 
     private final AnthropicChatModel chatModel = AnthropicChatModel.builder()
             .anthropicApi(AnthropicApi.builder()
-                    .apiKey("test-key-not-configured")
+                    .apiKey("test-api-key")
                     .baseUrl("https://aihubmix.com")
                     .build())
             .defaultOptions(AnthropicChatOptions.builder()

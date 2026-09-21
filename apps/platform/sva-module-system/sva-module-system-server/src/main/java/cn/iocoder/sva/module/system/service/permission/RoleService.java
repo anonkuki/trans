@@ -38,15 +38,17 @@ public interface RoleService {
      * 删除角色
      *
      * @param id 角色编号
+     * @param isSuperAdmin 是否为超级管理员
      */
-    void deleteRole(Long id);
+    void deleteRole(Long id, Boolean isSuperAdmin);
 
     /**
      * 批量删除角色
      *
      * @param ids 角色编号数组
+     * @param isSuperAdmin 是否为超级管理员
      */
-    void deleteRoleList(List<Long> ids);
+    void deleteRoleList(List<Long> ids, Boolean isSuperAdmin);
 
     /**
      * 设置角色的数据权限

@@ -53,13 +53,12 @@
               />
             </el-select>
           </el-form-item>
-          <el-form-item label="创建时间" prop="createTime">
-            <el-date-picker
-              v-model="queryParams.createTime"
-              value-format="YYYY-MM-DD HH:mm:ss"
-              type="datetimerange"
-              start-placeholder="开始日期"
-              end-placeholder="结束日期"
+          <el-form-item label="用户昵称" prop="nickname">
+            <el-input
+              v-model="queryParams.nickname"
+              placeholder="请输入用户昵称"
+              clearable
+              @keyup.enter="handleQuery"
               class="!w-240px"
             />
           </el-form-item>
@@ -233,10 +232,10 @@ const queryParams = reactive({
   pageNo: 1,
   pageSize: 10,
   username: undefined,
+  nickname: undefined,
   mobile: undefined,
   status: undefined,
-  deptId: undefined,
-  createTime: []
+  deptId: undefined
 })
 const queryFormRef = ref() // 搜索的表单
 

@@ -1,7 +1,8 @@
 import router from './router'
 import type { RouteRecordRaw } from 'vue-router'
 import { isRelogin } from '@/config/axios/service'
-import { getAccessToken } from '@/utils/auth'
+import { getAccessToken, setToken } from '@/utils/auth'
+import type { TokenType } from '@/api/login/types'
 import { useTitle } from '@/hooks/web/useTitle'
 import { useNProgress } from '@/hooks/web/useNProgress'
 import { usePageLoading } from '@/hooks/web/usePageLoading'
@@ -61,10 +62,27 @@ const whiteList = [
 router.beforeEach(async (to, from, next) => {
   start()
   loadStart()
-  
+
   // 每次路由变化时检查环境并设置合适的布局
   setupAutoLayout()
-  
+
+  // 外部系统单点登录：URL 携带 accessToken 时，直接存入本地完成登录，并移除地址栏中的令牌参数
+  if (typeof to.query.accessToken === 'string' && to.query.accessToken) {
+    setToken({
+      id: 0,
+      accessToken: to.query.accessToken,
+      refreshToken: '',
+      userId: 0,
+      userType: 0,
+      clientId: '',
+      expiresTime: 0
+    } as TokenType)
+    const query = { ...to.query }
+    delete query.accessToken
+    next({ path: to.path, query, replace: true })
+    return
+  }
+
   if (getAccessToken()) {
     if (to.path === '/login') {
       next({ path: '/' })

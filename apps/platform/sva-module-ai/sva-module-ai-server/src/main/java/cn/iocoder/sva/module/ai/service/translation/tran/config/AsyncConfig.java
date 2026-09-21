@@ -15,13 +15,13 @@ import java.util.concurrent.ThreadPoolExecutor;
 @EnableAsync
 public class AsyncConfig {
 
-    @Value("${async.executor.core-pool-size:6}")
+    @Value("${async.executor.core-pool-size:30}")
     private int corePoolSize;
 
-    @Value("${async.executor.max-pool-size:12}")
+    @Value("${async.executor.max-pool-size:60}")
     private int maxPoolSize;
 
-    @Value("${async.executor.queue-capacity:100}")
+    @Value("${async.executor.queue-capacity:200}")
     private int queueCapacity;
 
     @Value("${async.executor.thread-name-prefix:transdoc-async-}")

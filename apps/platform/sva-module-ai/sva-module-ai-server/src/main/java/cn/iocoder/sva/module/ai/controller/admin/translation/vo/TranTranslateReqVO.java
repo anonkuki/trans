@@ -6,6 +6,8 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.List;
+
 @Schema(description = "管理后台 - AI翻译 Request VO")
 @Data
 public class TranTranslateReqVO {
@@ -18,8 +20,8 @@ public class TranTranslateReqVO {
     @NotBlank(message = "目标语言不能为空")
     private String targetLang;
 
-    @Schema(description = "术语库ID", example = "1")
-    private Long glossaryId;
+    @Schema(description = "术语库ID列表（支持多选）", example = "[1, 2, 3]")
+    private List<Long> glossaryIds;
 
     @Schema(description = "是否使用术语替换", requiredMode = Schema.RequiredMode.REQUIRED, example = "false")
     private boolean useGlossaryReplace = false;
@@ -32,6 +34,9 @@ public class TranTranslateReqVO {
 
     @Schema(description = "是否启用质检", requiredMode = Schema.RequiredMode.REQUIRED, example = "false")
     private boolean enableQc = false;
+
+    @Schema(description = "是否译文前置（仅双语对照模式有效，勾选后译文在原文前面）", example = "false")
+    private boolean translationFirst = false;
 
     @Schema(description = "AI模型ID", example = "1")
     private Long modelId;

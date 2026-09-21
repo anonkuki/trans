@@ -89,8 +89,9 @@ const submitFormSuccess = () => {
 }
 
 /** 上传错误提示 */
-const submitFormError = (): void => {
-  message.error('上传失败，请您重新上传！')
+const submitFormError = (err: any): void => {
+  // 不显示任何提示，由axios拦截器统一在右上角显示错误消息
+  console.error('上传错误:', err)
   formLoading.value = false
 }
 

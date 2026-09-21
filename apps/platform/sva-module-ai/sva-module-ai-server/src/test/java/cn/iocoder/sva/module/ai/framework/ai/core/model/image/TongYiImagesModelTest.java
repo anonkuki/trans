@@ -18,7 +18,7 @@ public class TongYiImagesModelTest {
 
     private final DashScopeImageModel imageModel = DashScopeImageModel.builder()
             .dashScopeApi(DashScopeImageApi.builder()
-                    .apiKey("test-key-not-configured")
+                    .apiKey("test-api-key")
                     .build())
             .build();
 

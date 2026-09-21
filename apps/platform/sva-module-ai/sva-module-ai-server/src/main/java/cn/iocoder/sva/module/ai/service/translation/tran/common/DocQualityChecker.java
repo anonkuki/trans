@@ -15,8 +15,8 @@ public class DocQualityChecker {
     /** 数字匹配正则：匹配整数、小数、带分隔符的数字 */
     private static final Pattern NUMBER_PATTERN = Pattern.compile("[0-9]+(?:[.,/:][0-9]+)*");
 
-    /** 缩写匹配正则：匹配连续大写字母 */
-    private static final Pattern ABBR_PATTERN = Pattern.compile("\\b[A-Z]{2,}\\b");
+    /** 缩写匹配正则：匹配连续大写字母，使用 ASCII 字母环视代替 \b 以兼容中英文混合文本 */
+    private static final Pattern ABBR_PATTERN = Pattern.compile("(?<![A-Za-z])[A-Z]{2,}(?![A-Za-z])");
 
     private DocQualityChecker() {
         // 工具类，禁止实例化
@@ -42,7 +42,9 @@ public class DocQualityChecker {
 
         public static QcResult error(String status) {
             String errorType = status.startsWith("[ERROR]") ? "error" : "warn";
-            return new QcResult(false, status, errorType);
+            // WARN 级别不阻断翻译流程（如缩写被翻译为目标语言）
+            boolean ok = "warn".equals(errorType);
+            return new QcResult(ok, status, errorType);
         }
 
         public boolean isOk() {
@@ -99,13 +101,28 @@ public class DocQualityChecker {
 
     /**
      * 检查数字完整性
+     * <p>
+     * 比较纯数字值（去除分隔符），避免因语言间数字格式差异（如西班牙语 1.700 = 中文 1700）导致误报。
      */
     public static QcResult checkNumbers(String source, String target) {
         Set<String> srcNums = extractMatches(NUMBER_PATTERN, source);
         Set<String> tgtNums = extractMatches(NUMBER_PATTERN, target);
 
         for (String num : srcNums) {
-            if (!tgtNums.contains(num)) {
+            if (tgtNums.contains(num)) {
+                continue;
+            }
+            // 格式不同但纯数字相同也视为匹配（如 1.700 vs 1700, 8/10 vs 8 10）
+            String normalizedSrc = num.replaceAll("[.,/:]", "");
+            boolean found = false;
+            for (String tgtNum : tgtNums) {
+                String normalizedTgt = tgtNum.replaceAll("[.,/:]", "");
+                if (normalizedSrc.equals(normalizedTgt)) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
                 return QcResult.error("[ERROR] 数字丢失: " + num);
             }
         }
@@ -115,6 +132,9 @@ public class DocQualityChecker {
 
     /**
      * 检查缩写完整性
+     * <p>
+     * 缩写在翻译中可能被展开（如 USA → 美国，CQV 保留），
+     * 因此缩写丢失只作为警告而非错误，不阻断翻译流程。
      */
     public static QcResult checkAbbreviations(String source, String target) {
         Set<String> srcAbbrs = extractMatches(ABBR_PATTERN, source);
@@ -122,7 +142,8 @@ public class DocQualityChecker {
 
         for (String abbr : srcAbbrs) {
             if (!tgtAbbrs.contains(abbr)) {
-                return QcResult.error("[ERROR] 缩写丢失: " + abbr);
+                // 缩写可能被翻译为目标语言（如 USA → 美国），降级为 WARN
+                return QcResult.error("[WARN] 缩写丢失: " + abbr);
             }
         }
 

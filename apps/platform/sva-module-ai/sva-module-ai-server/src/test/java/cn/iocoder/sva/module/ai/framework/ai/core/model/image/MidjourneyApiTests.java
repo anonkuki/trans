@@ -16,7 +16,7 @@ public class MidjourneyApiTests {
 
     private final MidjourneyApi midjourneyApi = new MidjourneyApi(
             "https://api.holdai.top/mj", // 链接
-            "test-key-not-configured", // 密钥
+            "test-api-key", // 密钥
             null);
 
     @Test

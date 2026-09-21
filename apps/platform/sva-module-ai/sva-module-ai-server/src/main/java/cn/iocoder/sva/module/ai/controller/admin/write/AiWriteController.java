@@ -1,12 +1,15 @@
 package cn.iocoder.sva.module.ai.controller.admin.write;
 
+import cn.hutool.core.collection.CollUtil;
 import cn.iocoder.sva.framework.common.pojo.CommonResult;
 import cn.iocoder.sva.framework.common.pojo.PageResult;
 import cn.iocoder.sva.framework.common.util.object.BeanUtils;
 import cn.iocoder.sva.module.ai.controller.admin.write.vo.AiWriteGenerateReqVO;
 import cn.iocoder.sva.module.ai.controller.admin.write.vo.AiWritePageReqVO;
 import cn.iocoder.sva.module.ai.controller.admin.write.vo.AiWriteRespVO;
+import cn.iocoder.sva.module.ai.dal.dataobject.user.AdminUserDO;
 import cn.iocoder.sva.module.ai.dal.dataobject.write.AiWriteDO;
+import cn.iocoder.sva.module.ai.dal.mysql.user.AdminUserMapper;
 import cn.iocoder.sva.module.ai.service.write.AiWriteService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -18,7 +21,13 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
 import static cn.iocoder.sva.framework.common.pojo.CommonResult.success;
+import static cn.iocoder.sva.framework.common.util.collection.CollectionUtils.convertList;
 import static cn.iocoder.sva.framework.security.core.util.SecurityFrameworkUtils.getLoginUserId;
 
 @Tag(name = "管理后台 - AI 写作")
@@ -28,6 +37,9 @@ public class AiWriteController {
 
     @Resource
     private AiWriteService writeService;
+
+    @Resource
+    private AdminUserMapper adminUserMapper;
 
     @PostMapping(value = "/generate-stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @Operation(summary = "写作生成（流式）", description = "流式返回，响应较快")
@@ -50,8 +62,34 @@ public class AiWriteController {
     @Operation(summary = "获得写作分页")
     @PreAuthorize("@ss.hasPermission('ai:write:query')")
     public CommonResult<PageResult<AiWriteRespVO>> getWritePage(@Valid AiWritePageReqVO pageReqVO) {
+        // 如果传入了用户名，先查询用户ID
+        if (pageReqVO.getUsername() != null && !pageReqVO.getUsername().isEmpty()) {
+            AdminUserDO user = adminUserMapper.selectOne(AdminUserDO::getUsername, pageReqVO.getUsername());
+            if (user == null) {
+                // 用户不存在，返回空结果
+                return success(PageResult.empty());
+            }
+            pageReqVO.setUserId(user.getId());
+        }
+
         PageResult<AiWriteDO> pageResult = writeService.getWritePage(pageReqVO);
-        return success(BeanUtils.toBean(pageResult, AiWriteRespVO.class));
+        if (CollUtil.isEmpty(pageResult.getList())) {
+            return success(PageResult.empty());
+        }
+
+        // 获取所有用户ID，批量查询用户信息
+        List<Long> userIds = convertList(pageResult.getList(), AiWriteDO::getUserId);
+        Map<Long, String> userNameMap = new HashMap<>();
+        if (CollUtil.isNotEmpty(userIds)) {
+            List<AdminUserDO> users = adminUserMapper.selectBatchIds(userIds);
+            userNameMap = users.stream()
+                    .collect(Collectors.toMap(AdminUserDO::getId, AdminUserDO::getNickname));
+        }
+
+        // 填充用户姓名
+        Map<Long, String> finalUserNameMap = userNameMap;
+        return success(BeanUtils.toBean(pageResult, AiWriteRespVO.class,
+                write -> write.setUserName(finalUserNameMap.get(write.getUserId()))));
     }
 
 }

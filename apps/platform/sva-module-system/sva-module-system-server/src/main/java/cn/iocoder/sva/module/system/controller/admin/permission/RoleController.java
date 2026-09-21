@@ -76,7 +76,7 @@ public class RoleController {
     @Parameter(name = "id", description = "角色编号", required = true, example = "1024")
     @PreAuthorize("@ss.hasPermission('system:role:delete')")
     public CommonResult<Boolean> deleteRole(@RequestParam("id") Long id) {
-        roleService.deleteRole(id);
+        roleService.deleteRole(id, superAdmin());
         return success(true);
     }
 
@@ -85,7 +85,7 @@ public class RoleController {
     @Parameter(name = "ids", description = "编号列表", required = true)
     @PreAuthorize("@ss.hasPermission('system:role:delete')")
     public CommonResult<Boolean> deleteRoleList(@RequestParam("ids") List<Long> ids) {
-        roleService.deleteRoleList(ids);
+        roleService.deleteRoleList(ids, superAdmin());
         return success(true);
     }
 
@@ -238,7 +238,7 @@ public class RoleController {
         if (CollUtil.isEmpty(roleIds)) {
             return Collections.emptySet();
         }
-        
+
         List<RoleDO> roles = roleService.getRoleList(roleIds);
         roles.removeIf(role -> !CommonStatusEnum.ENABLE.getStatus().equals(role.getStatus())); // 移除禁用的角色
         Set<Long> longs = convertSet(roles, RoleDO::getId);
@@ -271,7 +271,7 @@ public class RoleController {
         if (CollUtil.isEmpty(roleIds)) {
             return Collections.emptySet();
         }
-        
+
         List<RoleDO> roles = roleService.getRoleList(roleIds);
         for (RoleDO role : roles) {
             if(role.getCreatorRole() != null &&  role.getCreatorRole() != 1L){
@@ -302,7 +302,7 @@ public class RoleController {
         if (CollUtil.isEmpty(roleIds)) {
             return false;
         }
-        
+
         List<RoleDO> roles = roleService.getRoleList(roleIds);
         roles.removeIf(role -> !CommonStatusEnum.ENABLE.getStatus().equals(role.getStatus())); // 移除禁用的角色
 

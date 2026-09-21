@@ -18,6 +18,9 @@ public class AiMindMapPageReqVO extends PageParam {
     @Schema(description = "用户编号", example = "4325")
     private Long userId;
 
+    @Schema(description = "用户名", example = "admin")
+    private String username;
+
     @Schema(description = "生成内容提示", example = "Java 学习路线")
     private String prompt;
 

@@ -24,11 +24,14 @@ import java.net.URI;
 import java.net.URL;
 import java.time.Duration;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * 基于 S3 协议的文件客户端，实现 MinIO、阿里云、腾讯云、七牛云、华为云等云服务
  *
  * @author 科兴源码
  */
+@Slf4j
 public class S3FileClient extends AbstractFileClient<S3FileClientConfig> {
 
     private static final Duration EXPIRATION_DEFAULT = Duration.ofHours(24);
@@ -73,6 +76,7 @@ public class S3FileClient extends AbstractFileClient<S3FileClientConfig> {
 
     @Override
     public String upload(byte[] content, String path, String type) {
+        log.info("[S3FileClient.upload] bucket: {}, key: {}", config.getBucket(), path);
         // 构造 PutObjectRequest
         PutObjectRequest putRequest = PutObjectRequest.builder()
                 .bucket(config.getBucket())
@@ -97,6 +101,7 @@ public class S3FileClient extends AbstractFileClient<S3FileClientConfig> {
 
     @Override
     public byte[] getContent(String path) {
+        log.info("[S3FileClient.getContent] bucket: {}, key: {}", config.getBucket(), path);
         GetObjectRequest getRequest = GetObjectRequest.builder()
                 .bucket(config.getBucket())
                 .key(path)

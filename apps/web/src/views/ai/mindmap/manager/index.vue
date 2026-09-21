@@ -10,20 +10,13 @@
       :inline="true"
       label-width="68px"
     >
-      <el-form-item label="用户编号" prop="userId">
-        <el-select
-          v-model="queryParams.userId"
+      <el-form-item label="用户名" prop="username">
+        <el-input
+          v-model="queryParams.username"
+          placeholder="请输入用户名"
           clearable
-          placeholder="请输入用户编号"
           class="!w-240px"
-        >
-          <el-option
-            v-for="item in userList"
-            :key="item.id"
-            :label="item.nickname"
-            :value="item.id"
-          />
-        </el-select>
+        />
       </el-form-item>
       <el-form-item label="提示词" prop="prompt">
         <el-input
@@ -56,11 +49,7 @@
   <ContentWrap>
     <el-table v-loading="loading" :data="list" :stripe="true" :show-overflow-tooltip="true">
       <el-table-column label="编号" align="center" prop="id" width="180" fixed="left" />
-      <el-table-column label="用户" align="center" prop="userId" width="180">
-        <template #default="scope">
-          <span>{{ userList.find((item) => item.id === scope.row.userId)?.nickname }}</span>
-        </template>
-      </el-table-column>
+      <el-table-column label="用户" align="center" prop="userName" width="180" />
       <el-table-column label="提示词" align="center" prop="prompt" width="180" />
       <el-table-column label="思维导图" align="center" prop="generatedContent" min-width="300" />
       <el-table-column label="模型" align="center" prop="model" width="180" />
@@ -110,7 +99,6 @@
 <script setup lang="ts">
 import { dateFormatter } from '@/utils/formatTime'
 import { AiMindMapApi, MindMapVO } from '@/api/ai/mindmap'
-import * as UserApi from '@/api/system/user'
 import Right from '@/views/ai/mindmap/index/components/Right.vue'
 
 /** AI 思维导图 列表 */
@@ -125,12 +113,11 @@ const total = ref(0) // 列表的总页数
 const queryParams = reactive({
   pageNo: 1,
   pageSize: 10,
-  userId: undefined,
+  username: undefined,
   prompt: undefined,
   createTime: []
 })
 const queryFormRef = ref() // 搜索的表单
-const userList = ref<UserApi.UserVO[]>([]) // 用户列表
 
 /** 查询列表 */
 const getList = async () => {
@@ -185,7 +172,5 @@ const openPreview = async (row: MindMapVO) => {
 /** 初始化 **/
 onMounted(async () => {
   getList()
-  // 获得用户列表
-  userList.value = await UserApi.getSimpleUserList()
 })
 </script>

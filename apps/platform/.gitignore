@@ -23,8 +23,6 @@ target/
 *.class
 target/*
 
-LOG*
-
 ### NetBeans ###
 /nbproject/private/
 /nbbuild/
@@ -75,3 +73,4 @@ functions/mock
 screenshot
 .firebase
 sessionStore
+/sql/ai_tran_text_history.sql

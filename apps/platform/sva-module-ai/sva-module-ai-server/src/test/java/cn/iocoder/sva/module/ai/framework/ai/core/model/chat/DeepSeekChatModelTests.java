@@ -24,7 +24,7 @@ public class DeepSeekChatModelTests {
 
     private final DeepSeekChatModel chatModel = DeepSeekChatModel.builder()
             .deepSeekApi(DeepSeekApi.builder()
-                    .apiKey("test-key-not-configured") // apiKey
+                    .apiKey("test-api-key") // apiKey
                     .build())
             .defaultOptions(DeepSeekChatOptions.builder()
                     .model("deepseek-chat") // 模型

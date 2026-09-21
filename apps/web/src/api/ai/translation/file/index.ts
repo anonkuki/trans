@@ -45,5 +45,10 @@ export const TranFileApi = {
   // 导出AI翻译文件信息 Excel
   exportTranFile: async (params) => {
     return await request.download({ url: `/ai/tran-file/export-excel`, params })
+  },
+
+  // 下载翻译文件（通过后端接口，避免前端直接请求 MinIO 导致文件名特殊字符被编码）
+  downloadFile: async (id: number, type: string = 'file'): Promise<Blob> => {
+    return await request.download({ url: `/ai/tran-file/download/${id}?type=${type}` })
   }
 }

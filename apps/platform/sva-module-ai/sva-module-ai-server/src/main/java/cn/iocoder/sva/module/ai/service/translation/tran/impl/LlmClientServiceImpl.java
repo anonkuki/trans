@@ -28,7 +28,9 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.Resource;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
@@ -51,16 +53,10 @@ public class LlmClientServiceImpl implements LlmClientService {
 
     /** Redis Key 前缀 */
     private static final String REDIS_KEY_PREFIX = "translation:llm_cache:";
-    
+
     /** 缓存过期时间：1天 */
     private static final long CACHE_EXPIRE_DAYS = 1;
 
-    /** 不良输出模式 */
-    private static final String[] BAD_PATTERNS = {
-            "翻译如下", "译文如下", "Here is the translation",
-            "Translation:", "译为：",
-            "作为一个", "作为一名", "很抱歉", "无法提供", "不能提供"
-    };
 
     /** 中文字符正则 */
     private static final Pattern CJK_PATTERN = Pattern.compile("[\\u4e00-\\u9fff]");
@@ -81,14 +77,14 @@ public class LlmClientServiceImpl implements LlmClientService {
             log.info("[LlmClientService] 使用 ThreadLocal 中的 ChatModel: {}", contextModel.getClass().getSimpleName());
             return contextModel;
         }
-        
+
         // 2. 使用默认的聊天模型
         try {
             AiModelDO defaultModel = aiModelService.getRequiredDefaultModel(AiModelTypeEnum.CHAT.getType());
             ChatModel defaultChatModel = aiModelService.getChatModel(defaultModel.getId());
-            log.info("[LlmClientService] 使用默认 ChatModel: {}, modelId={}, modelName={}, platform={}", 
-                    defaultChatModel.getClass().getSimpleName(), 
-                    defaultModel.getId(), 
+            log.info("[LlmClientService] 使用默认 ChatModel: {}, modelId={}, modelName={}, platform={}",
+                    defaultChatModel.getClass().getSimpleName(),
+                    defaultModel.getId(),
                     defaultModel.getName(),
                     defaultModel.getPlatform());
             return defaultChatModel;
@@ -158,7 +154,7 @@ public class LlmClientServiceImpl implements LlmClientService {
         if (cachedJson != null) {
             try {
                 TranslateResult cached = JsonUtils.parseObject(cachedJson, TranslateResult.class);
-                
+
                 // 检查缓存内容是否有效
                 if (cached == null || cached.getContent() == null) {
                     log.warn("[Redis缓存无效] key={}, content为null，删除缓存", cacheKey);
@@ -167,7 +163,7 @@ public class LlmClientServiceImpl implements LlmClientService {
                     log.warn("[Redis缓存无效] key={}, content为空字符串，删除缓存", cacheKey);
                     stringRedisTemplate.delete(redisKey);
                 } else {
-                    log.debug("[Redis缓存命中] key={}, content长度={}, status={}", 
+                    log.debug("[Redis缓存命中] key={}, content长度={}, status={}",
                             cacheKey, cached.getContent().length(), cached.getStatus());
                     return cached;
                 }
@@ -178,7 +174,7 @@ public class LlmClientServiceImpl implements LlmClientService {
         }
 
         log.debug("[Redis缓存未命中] key={}", cacheKey);
-        
+
         // 执行翻译
         TranslateResult result;
         switch (kind) {
@@ -197,7 +193,7 @@ public class LlmClientServiceImpl implements LlmClientService {
             log.warn("[Redis缓存跳过] key={}, 翻译结果为null，不存入缓存", cacheKey);
             return result != null ? result : new TranslateResult("", new UsageStats(), "[ERROR] 翻译结果为null");
         }
-        
+
         // 如果结果是空字符串或包含错误标记，不存入缓存
         if (result.getContent().isEmpty() || result.getStatus().startsWith("[ERROR]")) {
             log.warn("[Redis缓存跳过] key={}, 翻译失败(status={})，不存入缓存", cacheKey, result.getStatus());
@@ -222,16 +218,13 @@ public class LlmClientServiceImpl implements LlmClientService {
         rawContent = rawContent != null ? rawContent : "";
         usage = usage != null ? usage : new UsageStats();
 
-        // 检查是否通过
-        if (!isBadOutput(rawContent) && !violatesTargetLanguage(rawContent, targetLanguage)) {
-            log.debug("[sanitizeOrRetry] 翻译结果正常: content长度={}", rawContent.length());
+        // 仅检查是否违反目标语言约束
+        if (!violatesTargetLanguage(rawContent, targetLanguage)) {
             return new TranslateResult(rawContent, usage, "OK");
         }
 
         // 重试：使用严格模式
-        log.warn("[sanitizeOrRetry] 翻译输出异常，使用严格模式重试: isBadOutput={}, violatesTargetLanguage={}, content前50字符='{}'", 
-                isBadOutput(rawContent), 
-                violatesTargetLanguage(rawContent, targetLanguage),
+        log.warn("[sanitizeOrRetry] 翻译输出违反目标语言约束，使用严格模式重试: violatesTargetLanguage=true, content前50字符='{}'",
                 rawContent.substring(0, Math.min(50, rawContent.length())));
         TranslateResult retryResult = translateOnceStrict(text, targetLanguage);
 
@@ -239,15 +232,14 @@ public class LlmClientServiceImpl implements LlmClientService {
         UsageStats merged = mergeUsage(usage, retryResult.getUsage());
 
         // 检查重试结果
-        if (!isBadOutput(retryResult.getContent()) &&
-                !violatesTargetLanguage(retryResult.getContent(), targetLanguage)) {
-            log.info("[sanitizeOrRetry] 严格模式重试成功");
+        if (!violatesTargetLanguage(retryResult.getContent(), targetLanguage)) {
             return new TranslateResult(retryResult.getContent(), merged, "OK");
         }
 
-        // 仍然失败
-        log.error("[sanitizeOrRetry] 严格模式重试仍然失败，返回空字符串");
-        return new TranslateResult("", merged, "[ERROR] 模型异常输出");
+        // 仍然失败：返回原文而非空字符串，确保文档中不出现空白
+        log.error("[sanitizeOrRetry] 严格模式重试仍然失败，返回原文: '{}'",
+                text != null ? text.substring(0, Math.min(50, text.length())) : "(null)");
+        return new TranslateResult(text != null ? text : "", merged, "[WARN] 重试失败，保留原文");
     }
 
     // ===================== 缓存管理 =====================
@@ -308,24 +300,24 @@ public class LlmClientServiceImpl implements LlmClientService {
             messages.add(new UserMessage(text));
 
             ChatModel currentModel = getCurrentChatModel();
-            
+
             // 如果是 OpenAI 兼容模式或 DashScope，需要指定模型名称
             OpenAiChatOptions options;
             boolean needsModelParameter = currentModel instanceof OpenAiChatModel
                     || currentModel.getClass().getName().contains("DashScope");
-            
+
             if (needsModelParameter) {
                 // 尝试从 ThreadLocal 或默认模型中获取模型代码
                 String modelCode = getModelCodeFromContext();
                 if (modelCode != null && !modelCode.isEmpty()) {
-                    log.info("[LLM调用] {} 模式，使用模型: {}", 
+                    log.info("[LLM调用] {} 模式，使用模型: {}",
                             currentModel.getClass().getSimpleName(), modelCode);
                     options = OpenAiChatOptions.builder()
                             .temperature(temperature)
                             .model(modelCode)
                             .build();
                 } else {
-                    log.warn("[LLM调用] {} 模式，但未找到模型代码，使用默认配置", 
+                    log.warn("[LLM调用] {} 模式，但未找到模型代码，使用默认配置",
                             currentModel.getClass().getSimpleName());
                     options = OpenAiChatOptions.builder()
                             .temperature(temperature)
@@ -338,17 +330,26 @@ public class LlmClientServiceImpl implements LlmClientService {
             }
 
             Prompt prompt = new Prompt(messages, options);
-            
+
+            // 【新增】检测是否为 QC 调用，如果是则打印完整提示词
+            boolean isQcCall = systemPrompt != null && (
+                    systemPrompt.contains("scientific copy editor") ||
+                    systemPrompt.contains("质量审校")
+            );
+
+            if (isQcCall) {
+                log.info("[QC调用检测] 检测到 QC 专用提示词");
+                log.info("[QC-系统提示词] \n{}", systemPrompt);
+            }
+
             // 记录调用前的详细信息
-            log.info("[LLM调用开始] model={}, modelClass={}, temperature={}, text长度={}, systemPrompt长度={}",
+            log.info("[LLM调用开始] model={}, temperature={}, text长度={}",
                     currentModel.getClass().getSimpleName(),
-                    currentModel.getClass().getName(),
                     temperature,
-                    text != null ? text.length() : 0,
-                    systemPrompt != null ? systemPrompt.length() : 0);
-            
+                    text != null ? text.length() : 0);
+
             ChatResponse response = currentModel.call(prompt);
-            
+
             // 计算请求耗时
             long elapsedTime = System.currentTimeMillis() - startTime;
 
@@ -358,14 +359,16 @@ public class LlmClientServiceImpl implements LlmClientService {
             }
 
             UsageStats usage = extractUsage(response);
-            
-            // 记录调用后的结果和耗时
-            log.info("[LLM调用完成] content长度={}, status=OK, promptTokens={}, completionTokens={}, totalTokens={}, 耗时={}ms",
-                    content != null ? content.length() : 0,
-                    usage.getPromptTokens(),
-                    usage.getCompletionTokens(),
-                    usage.getTotalTokens(),
-                    elapsedTime);
+
+            // 【日志】打印发给AI的完整内容（系统提示词 + 用户原文）和AI返回的完整内容
+            log.info("[LLM翻译] 耗时: {}ms\n" +
+                    "===== 发给AI的完整内容（System Prompt + User Message）=====\n{}\n{}\n" +
+                    "===== AI返回完整内容 =====\n{}\n" +
+                    "===== END =====",
+                    elapsedTime,
+                    systemPrompt != null ? systemPrompt : "(null)",
+                    text != null ? text : "(null)",
+                    content != null ? content : "(null)");
 
             return new TranslateResult(content, usage, "OK");
 
@@ -389,10 +392,10 @@ public class LlmClientServiceImpl implements LlmClientService {
                 log.info("[getModelCodeFromContext] 从 AiModelContext 获取模型代码: {}", modelInfo.getModelCode());
                 return modelInfo.getModelCode();
             }
-            
+
             // 如果 AiModelContext 中没有，尝试从 ChatModelContext 推断
             // TODO: 后续可以增强此逻辑，从 ChatModel 实例中提取模型信息
-            
+
             // 最后返回默认值（用于通义千问兼容模式调用 DeepSeek）
             log.warn("[getModelCodeFromContext] 未找到模型代码，使用默认值: deepseek-v3");
             return "deepseek-v3";
@@ -460,18 +463,6 @@ public class LlmClientServiceImpl implements LlmClientService {
         return merged;
     }
 
-    /**
-     * 检查是否为不良输出
-     */
-    private boolean isBadOutput(String content) {
-        if (content == null) return true;
-        for (String pattern : BAD_PATTERNS) {
-            if (content.contains(pattern)) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     /**
      * 检查是否违反目标语言约束
@@ -484,8 +475,141 @@ public class LlmClientServiceImpl implements LlmClientService {
             return CJK_PATTERN.matcher(content).find();
         }
         if (targetLanguage.toLowerCase().startsWith("chinese")) {
-            // 目标是中文，允许少量英文单位/缩写，连续英文>=6判断为违规
-            return ALPHA_SEQ6.matcher(content).find();
+            // 目标是中文，允许少量英文单位/缩写
+            // 优化策略：
+            // 1. 如果内容很短（3个及以内单词），即使全是英文也认为是正常的（可能是短语无需翻译）
+            // 2. 提取所有连续的英文单词（长度>=2）
+            // 3. 计算英文内容占比，如果超过30%才认为违规
+            // 4. 或者单个英文单词长度超过20才认为违规（可能是整句未翻译），但引号内的内容除外
+
+            // 先检查是否是短句（3个及以内单词）
+            // 按空格分割，过滤空字符串，统计单词数
+            String[] words = content.trim().split("\\s+");
+            int wordCount = 0;
+            boolean hasLongEnglishWord = false;
+            for (String word : words) {
+                if (!word.isEmpty()) {
+                    wordCount++;
+                    // 去掉标点符号后检查纯字母部分长度
+                    String lettersOnly = word.replaceAll("[^A-Za-z]", "");
+                    if (lettersOnly.length() > 4) {
+                        hasLongEnglishWord = true;
+                    }
+                }
+            }
+
+            // 如果是3个及以内的单词，且没有超过4个字母的英文单词
+            // 认为是缩写/短标记（如 GMP、API、SU），允许不翻译
+            // 但如果包含完整英文单词（如 Glossary），则视为未翻译
+            if (wordCount <= 3 && !hasLongEnglishWord) {
+                log.debug("[violatesTargetLanguage] 短缩写(单词数={})，允许包含英文: {}", wordCount, content);
+                return false;
+            }
+
+            // 先检查是否有超长的英文单词（可能整句未翻译）
+            // 排除全大写缩写（如 WorldBioHazTec）和首字母大写专有名词（如 Moderna, Novartis）
+            // 只匹配全小写的超长单词（这才是真正的未翻译英文句子）
+            Pattern longEnglishWord = Pattern.compile("[a-z]{30,}");
+            java.util.regex.Matcher longMatcher = longEnglishWord.matcher(content);
+            while (longMatcher.find()) {
+                String matchedText = longMatcher.group();
+                int startIndex = longMatcher.start();
+
+                // 检查这个长单词是否在引号内
+                boolean isInQuotes = false;
+                // 向前查找最近的引号
+                int lastQuoteBefore = -1;
+                for (int i = startIndex - 1; i >= 0; i--) {
+                    char c = content.charAt(i);
+                    if (c == '"' || c == '"' || c == '\'') {
+                        lastQuoteBefore = i;
+                        break;
+                    }
+                }
+                // 向后查找最近的引号
+                int nextQuoteAfter = -1;
+                for (int i = startIndex + matchedText.length(); i < content.length(); i++) {
+                    char c = content.charAt(i);
+                    if (c == '"' || c == '"' || c == '\'') {
+                        nextQuoteAfter = i;
+                        break;
+                    }
+                }
+
+                // 如果前后都有引号，说明在引号内，允许
+                if (lastQuoteBefore != -1 && nextQuoteAfter != -1) {
+                    isInQuotes = true;
+                    log.debug("[violatesTargetLanguage] 检测到引号内的长文本，允许: {}", matchedText);
+                }
+
+                // 如果不在引号内，判定为违规
+                if (!isInQuotes) {
+                    log.warn("[violatesTargetLanguage] 检测到超长英文单词(>=20字符)且不在引号内，判定为违规: {}", content);
+                    return true;
+                }
+            }
+
+            // 提取所有连续英文片段（长度>=2），排除缩写、专有名词和引号内的内容
+            Pattern englishFragments = Pattern.compile("[A-Za-z]{2,}");
+            java.util.regex.Matcher matcher = englishFragments.matcher(content);
+            int totalEnglishLength = 0;
+            while (matcher.find()) {
+                String fragment = matcher.group();
+
+                // 跳过全大写缩写（如 GMP, API, USA, CQV）
+                if (fragment.equals(fragment.toUpperCase())) {
+                    continue;
+                }
+                // 跳过首字母大写的专有名词（如 Moderna, Novartis, Pfizer, Colombia）
+                // 特征：首字母大写且其余含小写，且长度合理（<=15字符）
+                if (Character.isUpperCase(fragment.charAt(0)) && fragment.length() <= 15
+                        && fragment.substring(1).matches(".*[a-z].*")) {
+                    continue;
+                }
+                int startIndex = matcher.start();
+
+                // 检查这个英文片段是否在引号内
+                boolean isInQuotes = false;
+                // 向前查找最近的引号
+                int lastQuoteBefore = -1;
+                for (int i = startIndex - 1; i >= 0; i--) {
+                    char c = content.charAt(i);
+                    if (c == '"' || c == '"' || c == '\'') {
+                        lastQuoteBefore = i;
+                        break;
+                    }
+                }
+                // 向后查找最近的引号
+                int nextQuoteAfter = -1;
+                for (int i = startIndex + fragment.length(); i < content.length(); i++) {
+                    char c = content.charAt(i);
+                    if (c == '"' || c == '"' || c == '\'') {
+                        nextQuoteAfter = i;
+                        break;
+                    }
+                }
+
+                // 如果前后都有引号，说明在引号内，不计入英文占比
+                if (lastQuoteBefore != -1 && nextQuoteAfter != -1) {
+                    log.debug("[violatesTargetLanguage] 引号内的英文片段，不计入占比: {}", fragment);
+                } else {
+                    // 不在引号内，计入英文占比
+                    totalEnglishLength += fragment.length();
+                }
+            }
+
+            // 计算英文占比
+            double englishRatio = content.isEmpty() ? 0 : (double) totalEnglishLength / content.length();
+
+            // 如果英文占比超过 60%，认为翻译失败
+            // 阈值提高是因为中文译文天然较短，公司名/缩写等专有名词占比容易偏高
+            if (englishRatio > 0.6) {
+                log.warn("[violatesTargetLanguage] 英文占比过高({:.1%})，判定为违规: {}", englishRatio, content);
+                return true;
+            }
+
+            // 否则认为是正常的（包含专有名词、缩写、引号内文本等）
+            return false;
         }
         return false;
     }
@@ -510,5 +634,99 @@ public class LlmClientServiceImpl implements LlmClientService {
         } catch (NumberFormatException e) {
             return defaultValue;
         }
+    }
+
+    // ===================== 术语约束翻译模式 =====================
+
+    @Override
+    public TranslateResult translateWithGlossaryConstraint(String text, String targetLanguage,
+                                                            Map<String, String> glossaryMap) {
+        // 构建术语约束翻译的系统提示词
+        String systemPrompt = buildConstraintPrompt(targetLanguage, glossaryMap);
+
+        // 【调试日志】打印原文和术语信息
+        log.info("[术语约束翻译-输入信息] 原文长度={}, 术语数={}, 目标语言={}, 原文前100字符='{}'",
+                text != null ? text.length() : 0,
+                glossaryMap != null ? glossaryMap.size() : 0,
+                targetLanguage,
+                text != null ? text.substring(0, Math.min(100, text.length())) : "null");
+        // 【调试日志】打印实际传给大模型的完整系统提示词，便于核对术语对照表是否正确拼入
+        log.info("[术语约束翻译-完整提示词] 目标语言={}, 术语数={}, systemPrompt=\n{}",
+                targetLanguage, glossaryMap != null ? glossaryMap.size() : 0, systemPrompt);
+
+        // 执行翻译调用（temperature=0.2，保持一定的灵活性）
+        return executeCall(systemPrompt, text, 0.2);
+    }
+
+    /**
+     * 构建术语约束翻译的提示词
+     * <p>
+     * 提示词结构：
+     * 1. 基础提示词（从数据库配置或默认值获取）
+     * 2. 术语约束说明
+     * 3. 术语对照表（仅当前段落涉及的）
+     * 4. 目标语言
+     *
+     * @param targetLanguage 目标语言
+     * @param glossaryMap    术语映射表
+     * @return 系统提示词
+     */
+    private String buildConstraintPrompt(String targetLanguage, Map<String, String> glossaryMap) {
+        StringBuilder prompt = new StringBuilder();
+
+        // 1. 先获取基础提示词（从 PromptContext 或默认值）
+        String basePrompt = PromptContext.get();
+        if (basePrompt != null && !basePrompt.isEmpty()) {
+            log.debug("[术语约束翻译] 使用数据库配置的基础提示词");
+            prompt.append(basePrompt);
+            prompt.append("\n\n");
+        } else {
+            // 如果缓存未命中，使用默认基础提示词
+            log.warn("[术语约束翻译] PromptContext 缓存未命中，使用默认基础提示词");
+            prompt.append(String.format(
+                    "你是专业的医学/GMP文档翻译专家，精通中英文技术术语。\n" +
+                    "【翻译要求】\n" +
+                    "- 译文必须正式、严谨，符合GMP文档规范\n" +
+                    "- 准确传达原文含义，不得增删或曲解\n" +
+                    "- 严格保留原文中的数字、日期、比例、单位、标点符号和格式\n" +
+                    "- 仅返回翻译文本，不输出任何解释、说明或引导语\n\n"
+            ));
+        }
+
+        // 2. 术语约束说明（这是术语约束模式特有的）
+        prompt.append("【术语使用要求】\n");
+        prompt.append("- 以下术语对照表列出了必须使用的专业术语\n");
+        prompt.append("- 翻译时必须在译文中使用对应的英文术语，不得使用其他表达方式\n");
+        prompt.append("- 如果原文中出现了术语表中的中文术语，译文必须使用对应的英文术语\n");
+        prompt.append("- 术语的一致性至关重要，请严格遵守\n\n");
+
+        // 3. 术语对照表（如果有）
+        if (glossaryMap != null && !glossaryMap.isEmpty()) {
+            prompt.append("【术语对照表】\n");
+            int termCount = 0;
+            for (Map.Entry<String, String> entry : glossaryMap.entrySet()) {
+                prompt.append(String.format("- %s → %s\n", entry.getKey(), entry.getValue()));
+                termCount++;
+                // 限制最多显示50个术语，避免提示词过长
+                if (termCount >= 50) {
+                    prompt.append("... (术语过多，仅显示前50个)\n");
+                    break;
+                }
+            }
+            prompt.append("\n");
+        } else {
+            prompt.append("【术语对照表】\n");
+            prompt.append("本次翻译无特定术语约束，请使用标准医学术语进行翻译。\n\n");
+        }
+
+        // 4. 目标语言说明
+        prompt.append(String.format("【目标语言】%s\n\n", targetLanguage));
+
+        // 5. 开始翻译指令
+        prompt.append("请翻译以下文本，严格遵守上述术语约束：\n");
+
+        String finalPrompt = prompt.toString();
+
+        return finalPrompt;
     }
 }

@@ -30,7 +30,6 @@ public class TaskInfo {
     @JsonProperty("taskId")
     private String id;
 
-    @JsonIgnore
     private Long fileId;
 
     @JsonIgnore

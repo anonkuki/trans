@@ -14,7 +14,7 @@ import org.springframework.ai.image.ImageResponse;
 public class SiliconFlowImageModelTests {
 
     private final SiliconFlowImageModel imageModel = new SiliconFlowImageModel(
-            new SiliconFlowImageApi("test-key-not-configured") // 密钥
+            new SiliconFlowImageApi("test-api-key") // 密钥
     );
 
     @Test

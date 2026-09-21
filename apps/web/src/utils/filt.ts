@@ -1,3 +1,5 @@
+import { processDownloadUrl } from './downloadHelper'
+
 export const openWindow = (
   url: string,
   opt?: {
@@ -125,6 +127,9 @@ export const downloadByUrl = ({
   target?: '_self' | '_blank'
   fileName?: string
 }): boolean => {
+  // 处理下载URL：如果当前访问的是IP地址，则将下载链接的域名也替换为该IP
+  let processedUrl = processDownloadUrl(url)
+
   const isChrome = window.navigator.userAgent.toLowerCase().indexOf('chrome') > -1
   const isSafari = window.navigator.userAgent.toLowerCase().indexOf('safari') > -1
 
@@ -134,11 +139,11 @@ export const downloadByUrl = ({
   }
   if (isChrome || isSafari) {
     const link = document.createElement('a')
-    link.href = url
+    link.href = processedUrl
     link.target = target
 
     if (link.download !== undefined) {
-      link.download = fileName || url.substring(url.lastIndexOf('/') + 1, url.length)
+      link.download = fileName || processedUrl.substring(processedUrl.lastIndexOf('/') + 1, processedUrl.length)
     }
 
     if (document.createEvent) {
@@ -148,10 +153,10 @@ export const downloadByUrl = ({
       return true
     }
   }
-  if (url.indexOf('?') === -1) {
-    url += '?download'
+  if (processedUrl.indexOf('?') === -1) {
+    processedUrl += '?download'
   }
 
-  openWindow(url, { target })
+  openWindow(processedUrl, { target })
   return true
 }

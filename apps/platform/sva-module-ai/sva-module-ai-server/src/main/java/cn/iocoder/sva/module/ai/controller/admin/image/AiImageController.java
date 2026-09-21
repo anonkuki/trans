@@ -1,5 +1,6 @@
 package cn.iocoder.sva.module.ai.controller.admin.image;
 
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.ObjUtil;
 import cn.iocoder.sva.module.ai.framework.ai.core.model.midjourney.api.MidjourneyApi;
 import cn.iocoder.sva.framework.common.pojo.CommonResult;
@@ -10,6 +11,8 @@ import cn.iocoder.sva.module.ai.controller.admin.image.vo.*;
 import cn.iocoder.sva.module.ai.controller.admin.image.vo.midjourney.AiMidjourneyActionReqVO;
 import cn.iocoder.sva.module.ai.controller.admin.image.vo.midjourney.AiMidjourneyImagineReqVO;
 import cn.iocoder.sva.module.ai.dal.dataobject.image.AiImageDO;
+import cn.iocoder.sva.module.ai.dal.dataobject.user.AdminUserDO;
+import cn.iocoder.sva.module.ai.dal.mysql.user.AdminUserMapper;
 import cn.iocoder.sva.module.ai.service.image.AiImageService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -22,9 +25,13 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static cn.iocoder.sva.framework.common.pojo.CommonResult.success;
+import static cn.iocoder.sva.framework.common.util.collection.CollectionUtils.convertList;
 import static cn.iocoder.sva.framework.security.core.util.SecurityFrameworkUtils.getLoginUserId;
 
 @Tag(name = "管理后台 - AI 绘画")
@@ -35,6 +42,9 @@ public class AiImageController {
 
     @Resource
     private AiImageService imageService;
+
+    @Resource
+    private AdminUserMapper adminUserMapper;
 
     @GetMapping("/my-page")
     @Operation(summary = "获取【我的】绘图分页")
@@ -115,8 +125,34 @@ public class AiImageController {
     @Operation(summary = "获得绘画分页")
     @PreAuthorize("@ss.hasPermission('ai:image:query')")
     public CommonResult<PageResult<AiImageRespVO>> getImagePage(@Valid AiImagePageReqVO pageReqVO) {
+        // 如果传入了用户名，先查询用户ID
+        if (pageReqVO.getUsername() != null && !pageReqVO.getUsername().isEmpty()) {
+            AdminUserDO user = adminUserMapper.selectOne(AdminUserDO::getUsername, pageReqVO.getUsername());
+            if (user == null) {
+                // 用户不存在，返回空结果
+                return success(PageResult.empty());
+            }
+            pageReqVO.setUserId(user.getId());
+        }
+
         PageResult<AiImageDO> pageResult = imageService.getImagePage(pageReqVO);
-        return success(BeanUtils.toBean(pageResult, AiImageRespVO.class));
+        if (CollUtil.isEmpty(pageResult.getList())) {
+            return success(PageResult.empty());
+        }
+
+        // 获取所有用户ID，批量查询用户信息
+        List<Long> userIds = convertList(pageResult.getList(), AiImageDO::getUserId);
+        Map<Long, String> userNameMap = new HashMap<>();
+        if (CollUtil.isNotEmpty(userIds)) {
+            List<AdminUserDO> users = adminUserMapper.selectBatchIds(userIds);
+            userNameMap = users.stream()
+                    .collect(Collectors.toMap(AdminUserDO::getId, AdminUserDO::getNickname));
+        }
+
+        // 填充用户姓名
+        Map<Long, String> finalUserNameMap = userNameMap;
+        return success(BeanUtils.toBean(pageResult, AiImageRespVO.class,
+                image -> image.setUserName(finalUserNameMap.get(image.getUserId()))));
     }
 
     @PutMapping("/update")

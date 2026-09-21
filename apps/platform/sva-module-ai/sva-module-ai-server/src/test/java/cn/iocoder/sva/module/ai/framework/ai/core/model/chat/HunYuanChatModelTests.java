@@ -27,7 +27,7 @@ public class HunYuanChatModelTests {
             .deepSeekApi(DeepSeekApi.builder()
                     .baseUrl(HunYuanChatModel.BASE_URL)
                     .completionsPath(HunYuanChatModel.COMPLETE_PATH)
-                    .apiKey("sk-abc") // apiKey
+                    .apiKey("test-api-key") // apiKey
                     .build())
             .defaultOptions(DeepSeekChatOptions.builder()
                     .model(HunYuanChatModel.MODEL_DEFAULT) // 模型
@@ -89,7 +89,7 @@ public class HunYuanChatModelTests {
             .deepSeekApi(DeepSeekApi.builder()
                     .baseUrl(HunYuanChatModel.DEEP_SEEK_BASE_URL)
                     .completionsPath(HunYuanChatModel.COMPLETE_PATH)
-                    .apiKey("sk-abc") // apiKey
+                    .apiKey("test-api-key") // apiKey
                     .build())
             .defaultOptions(DeepSeekChatOptions.builder()
 //                    .model(HunYuanChatModel.DEEP_SEEK_MODEL_DEFAULT) // 模型（"deepseek-v3"）

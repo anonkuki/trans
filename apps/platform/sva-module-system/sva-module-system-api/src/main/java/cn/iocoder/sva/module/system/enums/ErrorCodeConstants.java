@@ -16,6 +16,10 @@ public interface ErrorCodeConstants {
     ErrorCode AUTH_THIRD_LOGIN_NOT_BIND = new ErrorCode(1_002_000_005, "未绑定账号，需要进行绑定");
     ErrorCode AUTH_MOBILE_NOT_EXISTS = new ErrorCode(1_002_000_007, "手机号不存在");
     ErrorCode AUTH_REGISTER_CAPTCHA_CODE_ERROR = new ErrorCode(1_002_000_008, "验证码不正确，原因：{}");
+    ErrorCode AUTH_SSO_DECRYPT_ERROR = new ErrorCode(1_002_000_009, "单点登录失败，密文解密或解析失败");
+    ErrorCode AUTH_SSO_CONFIG_ERROR = new ErrorCode(1_002_000_010, "单点登录失败，参数配置【{}】不存在");
+    ErrorCode AUTH_SSO_EXPIRED = new ErrorCode(1_002_000_011, "登录已过期");
+    ErrorCode AUTH_SSO_PARAM_ERROR = new ErrorCode(1_002_000_012, "参数错误");
 
     // ========== 菜单模块 1-002-001-000 ==========
     ErrorCode MENU_NAME_DUPLICATE = new ErrorCode(1_002_001_000, "已经存在该名字的菜单");
@@ -178,5 +182,9 @@ public interface ErrorCodeConstants {
     ErrorCode DEPT_ROLE_NOT_EXISTS = new ErrorCode(1_002_030_001, "部门和角色关联不存在");
 
     ErrorCode TEMP_FILE_NOT_EXISTS = new ErrorCode(1_002_030_002, "模板管理不存在");
+
+    ErrorCode EXTERNAL_LINK_NOT_EXISTS = new ErrorCode(1_002_030_003, "系统外链不存在");
+
+    ErrorCode EXTERNAL_LINK_ROLE_NOT_EXISTS = new ErrorCode(1_002_030_004, "外链和角色关联不存在");
 
 }

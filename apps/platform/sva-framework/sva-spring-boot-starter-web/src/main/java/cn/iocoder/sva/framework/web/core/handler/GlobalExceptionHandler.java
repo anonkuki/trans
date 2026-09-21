@@ -46,6 +46,8 @@ import java.util.Map;
 import java.util.Set;
 
 import static cn.iocoder.sva.framework.common.exception.enums.GlobalErrorCodeConstants.*;
+import static cn.iocoder.sva.framework.apilog.core.filter.ApiAccessLogFilter.sanitizeJson;
+import static cn.iocoder.sva.framework.apilog.core.filter.ApiAccessLogFilter.sanitizeMap;
 
 /**
  * 全局异常处理器，将 Exception 翻译成 CommonResult + 对应的异常编号
@@ -373,8 +375,8 @@ public class GlobalExceptionHandler {
         errorLog.setApplicationName(applicationName);
         errorLog.setRequestUrl(request.getRequestURI());
         Map<String, Object> requestParams = MapUtil.<String, Object>builder()
-                .put("query", ServletUtils.getParamMap(request))
-                .put("body", ServletUtils.getBody(request)).build();
+                .put("query", sanitizeMap(ServletUtils.getParamMap(request), null))
+                .put("body", sanitizeJson(ServletUtils.getBody(request), null)).build();
         errorLog.setRequestParams(JsonUtils.toJsonString(requestParams));
         errorLog.setRequestMethod(request.getMethod());
         errorLog.setUserAgent(ServletUtils.getUserAgent(request));

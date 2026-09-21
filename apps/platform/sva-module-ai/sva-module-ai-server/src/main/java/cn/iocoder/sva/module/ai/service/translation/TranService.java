@@ -22,6 +22,22 @@ public interface TranService {
     List<TranGlossaryDO> getVisibleGlossaryList(Long userId, String username, String targetLanguage);
 
     /**
+     * 获取当前用户可编辑的术语库列表
+     * <p>
+     * 只返回用户有权限修改的术语库：
+     * - 超级管理员：所有术语库
+     * - 普通用户：自己创建的术语库 + 所属角色的术语库（roleId匹配）
+     * <p>
+     * 注意：不包含仅可见但不可修改的术语库（roleShow匹配但不属于用户角色的）
+     *
+     * @param userId 用户ID
+     * @param username 用户名
+     * @param targetLanguage 目标语言
+     * @return 可编辑的术语库列表
+     */
+    List<TranGlossaryDO> getEditableGlossaryList(Long userId, String username, String targetLanguage);
+
+    /**
      * 保存术语到术语库
      * <p>
      * 接收术语映射和术语库ID，先校验用户是否有权限操作该术语库，

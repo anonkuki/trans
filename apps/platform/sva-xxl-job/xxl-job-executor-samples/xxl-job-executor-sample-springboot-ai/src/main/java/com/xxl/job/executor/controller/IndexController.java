@@ -105,7 +105,7 @@ public class IndexController {
     // --------------------------------- dify workflow ---------------------------------
 
     // dify config sample
-    private final String apiKey = "app-46gHBiqUb5jqAHl9TDWwnRZ8";
+    private final String apiKey = System.getenv("DIFY_API_KEY");
     private final String baseUrl = "http://localhost/v1";
 
     @GetMapping("/dify/simple")

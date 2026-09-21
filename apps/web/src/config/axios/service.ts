@@ -252,21 +252,13 @@ const handleAuthorized = () => {
       return
     }
     isRelogin.show = true
-    ElMessageBox.confirm(t('sys.api.timeoutMessage'), t('common.confirmTitle'), {
-      showCancelButton: false,
-      closeOnClickModal: false,
-      showClose: false,
-      closeOnPressEscape: false,
-      confirmButtonText: t('login.relogin'),
-      type: 'warning'
-    }).then(() => {
-      resetRouter() // 重置静态路由表
-      deleteUserCache() // 删除用户缓存
-      removeToken()
-      isRelogin.show = false
-      // 干掉token后再走一次路由让它过router.beforeEach的校验
-      window.location.href = window.location.href
-    })
+    // 直接执行登出操作并跳转到登录页，不再显示弹窗
+    resetRouter() // 重置静态路由表
+    deleteUserCache() // 删除用户缓存
+    removeToken()
+    isRelogin.show = false
+    // 跳转到登录页
+    window.location.href = '/login'
   }
   return Promise.reject(t('sys.api.timeoutMessage'))
 }

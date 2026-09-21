@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 public class AiBoChaWebSearchClientTest {
 
     private final AiBoChaWebSearchClient webSearchClient = new AiBoChaWebSearchClient(
-            "test-key-not-configured");
+            "test-api-key");
 
     @Test
     @Disabled

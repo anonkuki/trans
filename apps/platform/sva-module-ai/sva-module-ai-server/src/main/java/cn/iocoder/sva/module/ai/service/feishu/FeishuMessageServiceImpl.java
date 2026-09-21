@@ -58,13 +58,16 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
     @Resource
     private FeishuAiUtil feishuAiUtil;
 
+    @Resource
+    private RestTemplate restTemplate;
+
     private String tenantAccessToken;
     private long tokenExpireTime;
 
     // ===================== 【新增】Redis Key 前缀 =====================
     private static final String REDIS_KEY_MESSAGE_RECEIVE_ID = "feishu:message:receive_id:";
     private static final String REDIS_KEY_CARD_ID = "feishu:card:id:";
-    
+
     // Redis Key 前缀：飞书用户ID -> 对话ID（与 FeishuAiUtil 保持一致）
     private static final String REDIS_KEY_CONVERSATION = "feishu:conversation:";
 
@@ -73,7 +76,7 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
         try {
             String messageId = message.getMessageId();
             String userMessage = message.getUserMessage();
-            
+
             String result = feishuAiUtil.handleMessageAi(userMessage, message.getUserId());
             replyMessage(message.getMessageId(), result);
         } catch (Exception e) {
@@ -84,43 +87,43 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
     @Override
     public void handleFileMessage(FeishuMessageDTO messageDTO) {
         try {
-            log.info("开始处理文件消息: userId={}, fileName={}", 
+            log.info("开始处理文件消息: userId={}, fileName={}",
                     messageDTO.getUserId(), messageDTO.getFileName());
-            
+
             // 1. 校验文件信息
             if (messageDTO.getFileKey() == null || messageDTO.getFileKey().isEmpty()) {
                 log.error("文件消息缺少 fileKey");
                 return;
             }
-            
+
             // 2. 从飞书下载文件（需要 messageId 和 fileKey）
-            log.info("正在从飞书下载文件: fileKey={}, messageId={}", 
+            log.info("正在从飞书下载文件: fileKey={}, messageId={}",
                     messageDTO.getFileKey(), messageDTO.getMessageId());
             byte[] fileBytes = downloadFile(messageDTO.getMessageId(), messageDTO.getFileKey());
-            
+
             if (fileBytes == null || fileBytes.length == 0) {
                 log.error("下载文件为空: fileKey={}", messageDTO.getFileKey());
                 return;
             }
-            
+
             log.info("文件下载成功: fileKey={}, size={} bytes", messageDTO.getFileKey(), fileBytes.length);
-            
+
             // 3. 上传到 MinIO
             String minioDirectory = "feishu/files";
             String minioUrl = fileHelper.uploadToMinio(fileBytes, messageDTO.getFileName(), minioDirectory);
-            
+
             // 4. 确保会话ID存在（如果不存在则创建）
             ensureConversationExists(messageDTO.getUserId());
-            
+
             // 5. 保存到 ChatbotFile 表
             saveFileToChatbotFile(messageDTO, fileBytes, minioUrl);
-            
+
             // 6. 先回复用户收到文件
             String replyText = String.format("收到文件\"%s\"", messageDTO.getFileName());
             replyMessage(messageDTO.getMessageId(), replyText);
-            
+
             // TODO: 后续逻辑处理（例如：调用翻译服务、OCR、AI分析等）
-            
+
         } catch (Exception e) {
             log.error("处理文件消息失败", e);
         }
@@ -129,47 +132,47 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
     @Override
     public void handlePostMessage(FeishuMessageDTO messageDTO) {
         try {
-            log.info("开始处理富文本消息: userId={}, text={}, imageCount={}", 
-                    messageDTO.getUserId(), 
+            log.info("开始处理富文本消息: userId={}, text={}, imageCount={}",
+                    messageDTO.getUserId(),
                     messageDTO.getUserMessage(),
                     messageDTO.getPostImageKeys() != null ? messageDTO.getPostImageKeys().size() : 0);
-            
+
             StringBuilder aiInputBuilder = new StringBuilder();
-            
+
             // 1. 添加文字内容
             if (messageDTO.getUserMessage() != null && !messageDTO.getUserMessage().isEmpty()) {
                 aiInputBuilder.append(messageDTO.getUserMessage()).append("\n\n");
             }
-            
+
             // 2. 确保会话ID存在（如果不存在则创建）
             ensureConversationExists(messageDTO.getUserId());
-            
+
             // 3. 处理图片：下载并上传到 MinIO
             if (messageDTO.getPostImageKeys() != null && !messageDTO.getPostImageKeys().isEmpty()) {
                 log.info("开始处理 {} 张图片", messageDTO.getPostImageKeys().size());
-                
+
                 for (int i = 0; i < messageDTO.getPostImageKeys().size(); i++) {
                     String imageKey = messageDTO.getPostImageKeys().get(i);
-                    
+
                     try {
                         // 下载图片
-                        log.info("正在下载图片 [{}/{}]: imageKey={}", 
+                        log.info("正在下载图片 [{}/{}]: imageKey={}",
                                 i + 1, messageDTO.getPostImageKeys().size(), imageKey);
                         byte[] imageBytes = downloadFile(messageDTO.getMessageId(), imageKey);
-                        
+
                         if (imageBytes != null && imageBytes.length > 0) {
                             // 上传到 MinIO
                             String imageName = "image_" + System.currentTimeMillis() + "_" + i + ".png";
                             String minioDirectory = "feishu/images";
                             String imageUrl = fileHelper.uploadToMinio(imageBytes, imageName, minioDirectory);
-                            
+
                             // 保存到 ChatbotFile 表
                             saveImageToChatbotFile(messageDTO, imageBytes, imageUrl, imageName);
-                            
+
                             // 添加到 AI 输入
                             aiInputBuilder.append(String.format("[图片%d](%s)\n", i + 1, imageUrl));
-                            
-                            log.info("图片 [{}/{}] 已上传到 MinIO: {}", 
+
+                            log.info("图片 [{}/{}] 已上传到 MinIO: {}",
                                     i + 1, messageDTO.getPostImageKeys().size(), imageUrl);
                         }
                     } catch (Exception e) {
@@ -178,15 +181,15 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
                     }
                 }
             }
-            
+
             // 4. 调用 AI 处理（文字+图片URL）
             String aiResponse = feishuAiUtil.handleMessageAi(aiInputBuilder.toString().trim(), messageDTO.getUserId());
-            
+
             // 5. 回复用户
             replyMessage(messageDTO.getMessageId(), aiResponse);
-            
+
             log.info("富文本消息处理完成: userId={}", messageDTO.getUserId());
-            
+
         } catch (Exception e) {
             log.error("处理富文本消息失败", e);
             try {
@@ -203,45 +206,45 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
     private void saveFileToChatbotFile(FeishuMessageDTO messageDTO, byte[] fileBytes, String minioUrl) {
         try {
             ChatbotFileDO chatbotFile = new ChatbotFileDO();
-            
+
             // 文件名称
             chatbotFile.setFileName(messageDTO.getFileName());
-            
+
             // 文件路径（MinIO URL）
             chatbotFile.setFilePath(minioUrl);
-            
+
             // 用户问题（使用文件消息的提示文本）
             chatbotFile.setUserQuestion(messageDTO.getUserMessage());
-            
+
             // 文件大小
             chatbotFile.setFileSize((long) fileBytes.length);
-            
+
             // 文件类型
             chatbotFile.setFileType("feishuBot");
-            
+
             // 文件后缀（从文件名提取）
             String fileName = messageDTO.getFileName();
             if (fileName != null && fileName.contains(".")) {
                 String extension = fileName.substring(fileName.lastIndexOf("."));
                 chatbotFile.setFileExtension(extension);
             }
-            
+
             // 上传时间
             chatbotFile.setUploadTime(LocalDateTime.now());
-            
+
             // 用户工号（使用 userId）
             chatbotFile.setUserJobNumber(messageDTO.getUserId());
-            
+
             // 会话ID（从 Redis 获取 AI 对话的 conversationId）
             String conversationId = getConversationIdFromUserId(messageDTO.getUserId());
             chatbotFile.setSessionId(conversationId);
-            
+
             // 保存到数据库
             ChatbotFileSaveReqVO saveReqVO = new ChatbotFileSaveReqVO();
             BeanUtils.copyProperties(chatbotFile, saveReqVO);
             chatbotFileService.createChatbotFile(saveReqVO);
-            
-            log.info("文件信息已保存到 ChatbotFile 表: fileName={}, fileId={}, sessionId={}", 
+
+            log.info("文件信息已保存到 ChatbotFile 表: fileName={}, fileId={}, sessionId={}",
                     chatbotFile.getFileName(), chatbotFile.getId(), conversationId);
         } catch (Exception e) {
             log.error("保存文件信息到 ChatbotFile 表失败", e);
@@ -254,22 +257,22 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
     private void saveImageToChatbotFile(FeishuMessageDTO messageDTO, byte[] imageBytes, String minioUrl, String imageName) {
         try {
             ChatbotFileDO chatbotFile = new ChatbotFileDO();
-            
+
             // 文件名称
             chatbotFile.setFileName(imageName);
-            
+
             // 文件路径（MinIO URL）
             chatbotFile.setFilePath(minioUrl);
-            
+
             // 用户问题（使用富文本消息的文字内容）
             chatbotFile.setUserQuestion(messageDTO.getUserMessage());
-            
+
             // 文件大小
             chatbotFile.setFileSize((long) imageBytes.length);
-            
+
             // 文件类型（图片）
             chatbotFile.setFileType("feishuBot");
-            
+
             // 文件后缀（从文件名中提取）
             if (imageName != null && imageName.contains(".")) {
                 String extension = imageName.substring(imageName.lastIndexOf("."));
@@ -277,23 +280,23 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
             } else {
                 chatbotFile.setFileExtension(".png"); // 默认后缀
             }
-            
+
             // 上传时间
             chatbotFile.setUploadTime(LocalDateTime.now());
-            
+
             // 用户工号（使用 userId）
             chatbotFile.setUserJobNumber(messageDTO.getUserId());
-            
+
             // 会话ID（从 Redis 获取 AI 对话的 conversationId）
             String conversationId = getConversationIdFromUserId(messageDTO.getUserId());
             chatbotFile.setSessionId(conversationId);
-            
+
             // 保存到数据库
             ChatbotFileSaveReqVO saveReqVO = new ChatbotFileSaveReqVO();
             BeanUtils.copyProperties(chatbotFile, saveReqVO);
             chatbotFileService.createChatbotFile(saveReqVO);
-            
-            log.info("图片信息已保存到 ChatbotFile 表: imageName={}, fileId={}, sessionId={}", 
+
+            log.info("图片信息已保存到 ChatbotFile 表: imageName={}, fileId={}, sessionId={}",
                     chatbotFile.getFileName(), chatbotFile.getId(), conversationId);
         } catch (Exception e) {
             log.error("保存图片信息到 ChatbotFile 表失败", e);
@@ -306,7 +309,7 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
     private void replyMessage(String messageId, String text) {
         try {
             String replyMode = oauthPropertiesConfig.getFeishu().getReplyMode();
-            
+
             if ("stream".equalsIgnoreCase(replyMode)) {
                 // 流式卡片回复
                 replyStreamMessage(messageId, text);
@@ -322,31 +325,31 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
     @Override
     public String replyStreamMessage(String messageId, String text) throws Exception {
         OauthPropertiesConfig.FeiShu feishu = oauthPropertiesConfig.getFeishu();
-        
+
         // 1. 从 Redis 获取 receive_id
         String receiveId = getReceiveIdFromMessage(messageId);
         if (receiveId == null) {
             log.warn("无法获取 receive_id，降级为文本回复: messageId={}", messageId);
             return replyTextMessage(messageId, text);
         }
-        
+
         // 2. 创建流式卡片实体
         String cardId = createStreamingCard(feishu);
         if (cardId == null) {
             log.warn("创建卡片实体失败，降级为文本回复: messageId={}", messageId);
             return replyTextMessage(messageId, text);
         }
-        
+
         // 3. 发送卡片消息
         boolean sendSuccess = sendCardMessage(feishu, receiveId, cardId);
         if (!sendSuccess) {
             log.warn("发送卡片消息失败，降级为文本回复: messageId={}", messageId);
             return replyTextMessage(messageId, text);
         }
-        
+
         // 4. 流式更新卡片内容
         updateCardContent(feishu, cardId, text);
-        
+
         log.info("流式卡片回复成功: messageId={}, cardId={}", messageId, cardId);
         return cardId;
     }
@@ -358,7 +361,7 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
         if (messageId == null) {
             return null;
         }
-        
+
         try {
             String redisKey = REDIS_KEY_MESSAGE_RECEIVE_ID + messageId;
             return stringRedisTemplate.opsForValue().get(redisKey);
@@ -375,7 +378,7 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
         if (userId == null) {
             return null;
         }
-        
+
         try {
             String redisKey = REDIS_KEY_CONVERSATION + userId;
             String conversationId = stringRedisTemplate.opsForValue().get(redisKey);
@@ -396,10 +399,10 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
             if (conversationId != null) {
                 return;
             }
-            
+
             // 2. 不存在，通过调用 AI 创建一个空对话来初始化
             feishuAiUtil.handleMessageAi("你好", userId);
-            
+
             // 3. 验证是否创建成功
             conversationId = getConversationIdFromUserId(userId);
             if (conversationId != null) {
@@ -474,7 +477,6 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
         headers.setBearerAuth(getTenantAccessToken());
 
         HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(requestBody, headers);
-        RestTemplate restTemplate = new RestTemplate();
 
         try {
             ResponseEntity<Map> response = restTemplate.postForEntity(url, requestEntity, Map.class);
@@ -528,7 +530,6 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
                 .queryParam("receive_id_type", "user_id");
 
         HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(requestBody, headers);
-        RestTemplate restTemplate = new RestTemplate();
 
         try {
             ResponseEntity<Map> response = restTemplate.exchange(
@@ -575,7 +576,6 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
         headers.setBearerAuth(getTenantAccessToken());
 
         HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(requestBody, headers);
-        RestTemplate restTemplate = new RestTemplate();
 
         try {
             ResponseEntity<Map> response = restTemplate.exchange(
@@ -614,7 +614,6 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
         headers.setBearerAuth(getTenantAccessToken());
 
         HttpEntity<Void> requestEntity = new HttpEntity<>(headers);
-        RestTemplate restTemplate = new RestTemplate();
 
         try {
             ResponseEntity<byte[]> response = restTemplate.exchange(
@@ -681,7 +680,6 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
                 .queryParam("receive_id_type", receiveIdType);
 
         HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(requestBody, headers);
-        RestTemplate restTemplate = new RestTemplate();
 
         try {
             // 发送请求
@@ -751,7 +749,6 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
                 .uriVariables(Map.of("message_id", messageId));
 
         HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(requestBody, headers);
-        RestTemplate restTemplate = new RestTemplate();
 
         try {
             // 发送请求
@@ -801,7 +798,6 @@ public class FeishuMessageServiceImpl implements FeishuMessageService {
         requestBody.put("app_id", appId);
         requestBody.put("app_secret", appSecret);
 
-        RestTemplate restTemplate = new RestTemplate();
         ResponseEntity<Map> response = restTemplate.postForEntity(url, requestBody, Map.class);
 
         if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {

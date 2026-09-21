@@ -228,11 +228,11 @@ const clear = () => {
       <ColorRadioPicker
         v-model="systemTheme"
         :schema="[
+          '#ee4f12',
           '#409eff',
           '#009688',
           '#536dfe',
           '#ff5c93',
-          '#ee4f12',
           '#0096c7',
           '#9c27b0',
           '#ff9800'
@@ -246,9 +246,9 @@ const clear = () => {
         v-model="headerTheme"
         :schema="[
           '#fff',
+          '#ee4f12',
           '#151515',
           '#5172dc',
-          '#e74c3c',
           '#24292e',
           '#394664',
           '#009688',
@@ -264,13 +264,13 @@ const clear = () => {
           v-model="menuTheme"
           :schema="[
             '#fff',
+            '#dee2f4',
+            '#ee4f12',
             '#001529',
             '#212121',
             '#273352',
             //'#191b24',
-            '#dee2f4',
             '#383f45',
-            '#001628',
             '#344058'
           ]"
           @change="setMenuTheme"

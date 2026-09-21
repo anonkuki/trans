@@ -11,11 +11,11 @@
       <div
         class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-30px w-full max-w-500px mx-20px lt-sm:p-20px"
       >
-        <!-- 右上角的主题、语言选择 -->
-        <div class="flex items-center justify-end space-x-10px mb-6">
+        <!-- 右上角的主题、语言选择（暂时隐藏） -->
+        <!-- <div class="flex items-center justify-end space-x-10px mb-6">
           <ThemeSwitch />
           <LocaleDropdown />
-        </div>
+        </div> -->
 
         <!-- 表单容器 -->
         <!-- <Transition appear enter-active-class="animate__animated animate__bounceInRight"> -->

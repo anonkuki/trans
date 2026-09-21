@@ -136,7 +136,7 @@ logging:
 wx:
   mp: # 公众号配置（必填），参见 https://github.com/Wechat-Group/WxJava/blob/develop/spring-boot-starters/wx-java-mp-spring-boot-starter/README.md 文档
     #    app-id: wx041349c6f39b268b
-    #    secret: ${WECHAT_MINIAPP_SECRET:}
+    #    secret: ${SVA_CONFIG_SECRET:}
     app-id: wx5b23ba7a5589ecbb # 测试号
     secret: ${SVA_CONFIG_SECRET:}
     # 存储配置，解决 AccessToken 的跨节点的共享
@@ -146,7 +146,7 @@ wx:
       http-client-type: HttpClient # 采用 HttpClient 请求微信公众号平台
   miniapp: # 小程序配置（必填），参见 https://github.com/Wechat-Group/WxJava/blob/develop/spring-boot-starters/wx-java-miniapp-spring-boot-starter/README.md 文档
     #    appid: wx62056c0d5e8db250
-    #    secret: ${WECHAT_MP_SECRET:}
+    #    secret: ${SVA_CONFIG_SECRET:}
     appid: wx63c280fe3248a3e7 # wenhualian的接口测试号
     secret: ${SVA_CONFIG_SECRET:}
     config-storage:
@@ -164,13 +164,13 @@ justauth:
   enabled: true
   type:
     DINGTALK: # 钉钉
-      client-id: ${DINGTALK_CLIENT_ID:}
-      client-secret: ${DINGTALK_CLIENT_SECRET:}
+      client-id: dingvrnreaje3yqvzhxg
+      client-secret: ${SVA_CONFIG_SECRET:}
       ignore-check-redirect-uri: true
     WECHAT_ENTERPRISE: # 企业微信
-      client-id: ${WECOM_CLIENT_ID:}
-      client-secret: ${WECOM_CLIENT_SECRET:}
-      agent-id: ${WECOM_AGENT_ID:}
+      client-id: wwd411c69a39ad2e54
+      client-secret: ${SVA_CONFIG_SECRET:}
+      agent-id: 1000004
       ignore-check-redirect-uri: true
     # noinspection SpringBootApplicationYaml
     WECHAT_MINI_PROGRAM: # 微信小程序
@@ -184,7 +184,7 @@ justauth:
       ignore-check-redirect-uri: true
     ALIPAY: # 支付宝小程序
       client-id: xx
-      client-secret: xx
+      client-secret: ${SVA_CONFIG_SECRET:}
       alipay-public-key: xx
       ignore-check-redirect-uri: true
       ignore-check-state: true

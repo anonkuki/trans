@@ -95,7 +95,13 @@
       <el-table-column label="参数分类" align="center" prop="category" />
       <el-table-column label="参数名称" align="center" prop="name" :show-overflow-tooltip="true" />
       <el-table-column label="参数键名" align="center" prop="key" :show-overflow-tooltip="true" />
-      <el-table-column label="参数键值" align="center" prop="value" />
+      <el-table-column
+        label="参数键值"
+        align="center"
+        prop="value"
+        width="300"
+        :show-overflow-tooltip="true"
+      />
       <el-table-column label="是否可见" align="center" prop="visible">
         <template #default="scope">
           <dict-tag :type="DICT_TYPE.INFRA_BOOLEAN_STRING" :value="scope.row.visible" />

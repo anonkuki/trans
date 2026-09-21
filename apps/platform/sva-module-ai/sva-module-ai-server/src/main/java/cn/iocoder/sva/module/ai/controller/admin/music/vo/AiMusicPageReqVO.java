@@ -21,6 +21,9 @@ public class AiMusicPageReqVO extends PageParam {
     @Schema(description = "用户编号", example = "12212")
     private Long userId;
 
+    @Schema(description = "用户名", example = "admin")
+    private String username;
+
     @Schema(description = "音乐名称", example = "夜空中最亮的星")
     private String title;
 

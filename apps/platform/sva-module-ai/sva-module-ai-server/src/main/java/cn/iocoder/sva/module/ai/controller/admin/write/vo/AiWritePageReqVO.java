@@ -18,6 +18,9 @@ public class AiWritePageReqVO extends PageParam {
     @Schema(description = "用户编号", example = "28404")
     private Long userId;
 
+    @Schema(description = "用户名", example = "admin")
+    private String username;
+
     @Schema(description = "写作类型", example = "1")
     private Integer type;
 

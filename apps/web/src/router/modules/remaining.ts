@@ -71,6 +71,16 @@ const remainingRouter: AppRouteRecordRaw[] = [
     ]
   },
   {
+    // 外部系统单点登录入口：携带 accessToken 的链接访问后，重定向到首页
+    path: '/workbench',
+    redirect: '/index',
+    name: 'Workbench',
+    meta: {
+      hidden: true,
+      noTagsView: true
+    }
+  },
+  {
     path: '/user',
     component: Layout,
     name: 'UserInfo',

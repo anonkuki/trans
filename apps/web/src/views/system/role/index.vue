@@ -139,6 +139,16 @@
             菜单权限
           </el-button>
           <el-button
+            v-hasPermi="['system:external-link:assign']"
+            link
+            preIcon="ep:link"
+            title="外链权限"
+            type="primary"
+            @click="openAssignExternalLinkForm(scope.row)"
+          >
+            外链权限
+          </el-button>
+          <el-button
             v-hasPermi="['system:permission:assign-role-data-scope']"
             link
             preIcon="ep:coin"
@@ -182,6 +192,8 @@
   <RoleForm ref="formRef" @success="getList" />
   <!-- 表单弹窗：菜单权限 -->
   <RoleAssignMenuForm ref="assignMenuFormRef" @success="getList" />
+  <!-- 表单弹窗：外链权限 -->
+  <RoleAssignExternalLinkForm ref="assignExternalLinkFormRef" @success="getList" />
   <!-- 表单弹窗：数据权限 -->
   <RoleDataPermissionForm ref="dataPermissionFormRef" @success="getList" />
   <!-- 表单弹窗：组织角色权限 -->
@@ -195,6 +207,7 @@ import download from '@/utils/download'
 import * as RoleApi from '@/api/system/role'
 import RoleForm from './RoleForm.vue'
 import RoleAssignMenuForm from './RoleAssignMenuForm.vue'
+import RoleAssignExternalLinkForm from './RoleAssignExternalLinkForm.vue'
 import RoleDataPermissionForm from './RoleDataPermissionForm.vue'
 import RoleOrgPermissionForm from './RoleOrgPermissionForm.vue' // 新增组件
 
@@ -263,6 +276,12 @@ const openOrgPermissionForm = async (row: RoleApi.RoleVO) => {
 const assignMenuFormRef = ref()
 const openAssignMenuForm = async (row: RoleApi.RoleVO) => {
   assignMenuFormRef.value.open(row)
+}
+
+/** 外链权限操作 */
+const assignExternalLinkFormRef = ref()
+const openAssignExternalLinkForm = async (row: RoleApi.RoleVO) => {
+  assignExternalLinkFormRef.value.open(row)
 }
 
 /** 删除按钮操作 */

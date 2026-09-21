@@ -30,7 +30,7 @@
           />
         </el-select>
       </el-form-item>
-      <el-form-item label="所属角色" prop="roleId">
+      <el-form-item label="所属角色" prop="roleId" v-hasPermi="['ai:tran-glossary:role']">
         <el-select v-model="formData.roleId" clearable placeholder="请选择所属角色" :loading="roleListLoading">
           <el-option
             v-for="role in roleList"
@@ -40,7 +40,7 @@
           />
         </el-select>
       </el-form-item>
-      <el-form-item label="可见角色" prop="roleShow">
+      <el-form-item label="可见角色" prop="roleShow" v-hasPermi="['ai:tran-glossary:role-show']">
         <el-select v-model="formData.roleShow" clearable placeholder="请选择可见角色" :loading="roleListLoading">
           <el-option
             v-for="role in roleList"

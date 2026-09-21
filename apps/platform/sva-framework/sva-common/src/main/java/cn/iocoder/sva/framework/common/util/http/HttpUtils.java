@@ -52,14 +52,54 @@ public class HttpUtils {
      * 解码 URL 路径
      * 与 {@link #decodeUtf8(String)} 不同，此方法不会将 + 解码为空格，保持 + 为字面字符
      * 适用于 URL path 部分的解码
+     * <p>
+     * 此方法能安全处理以下特殊字符，不会因 URLDecoder 抛出 IllegalArgumentException：
+     * <ul>
+     *   <li>英文百分号 %（U+0025）：如 "文件100%.docx"、"6%汉译英.docx"</li>
+     *   <li>中文全角百分号 ％（U+FF05）：统一转换为英文 % 后按同样逻辑处理</li>
+     *   <li>不完整的编码序列：如路径末尾的 "%"、"%2" 等</li>
+     *   <li>多个连续百分号：如 "100%%完成"</li>
+     * </ul>
      *
      * @param path URL 路径
      * @return 解码后的路径
      */
     public static String decodeUrlPath(String path) {
-        // 先将 + 替换为 %2B，避免被 URLDecoder 解码为空格
-        String encoded = path.replace("+", "%2B");
-        return URLDecoder.decode(encoded, StandardCharsets.UTF_8);
+        // 1. 将全角百分号 ％（U+FF05）统一转为半角 %（U+0025），后续统一处理
+        String encoded = path.replace("\uFF05", "%");
+        // 2. 将 + 替换为 %2B，避免被 URLDecoder 解码为空格
+        encoded = encoded.replace("+", "%2B");
+        // 3. 逐字符扫描：将不是合法 URL 编码序列的裸 % 替换为占位符
+        //    合法序列：% 后紧跟两位 ASCII 十六进制数字（如 %20、%E4、%a9）
+        //    裸百分号：% 在字符串末尾、后面不足2个字符、或后面不是两位十六进制数字
+        String placeholder = "\u0000PERCENT\u0000";
+        StringBuilder sb = new StringBuilder(encoded.length());
+        for (int i = 0; i < encoded.length(); i++) {
+            char c = encoded.charAt(i);
+            if (c == '%') {
+                if (i + 2 < encoded.length() && isAsciiHex(encoded.charAt(i + 1)) && isAsciiHex(encoded.charAt(i + 2))) {
+                    // 合法的 URL 编码序列（如 %20、%E4），保留交给 URLDecoder 解码
+                    sb.append(c);
+                } else {
+                    // 裸百分号，用占位符保护，避免 URLDecoder 抛出异常
+                    sb.append(placeholder);
+                }
+            } else {
+                sb.append(c);
+            }
+        }
+        // 4. 解码合法的 URL 编码序列
+        String decoded = URLDecoder.decode(sb.toString(), StandardCharsets.UTF_8);
+        // 5. 将占位符还原为百分号
+        return decoded.replace(placeholder, "%");
+    }
+
+    /**
+     * 判断字符是否为 ASCII 十六进制数字（0-9, a-f, A-F）
+     * 仅匹配 ASCII 范围内的字符，不使用正则表达式，确保跨平台行为一致
+     */
+    private static boolean isAsciiHex(char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
     }
 
     @SuppressWarnings("unchecked")

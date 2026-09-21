@@ -16,6 +16,9 @@ public class AiMusicRespVO {
     @Schema(description = "用户编号", requiredMode = Schema.RequiredMode.REQUIRED, example = "12212")
     private Long userId;
 
+    @Schema(description = "用户昵称", example = "张三")
+    private String userName;
+
     @Schema(description = "音乐名称", requiredMode = Schema.RequiredMode.REQUIRED, example = "夜空中最亮的星")
     private String title;
 

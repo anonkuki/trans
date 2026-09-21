@@ -127,6 +127,7 @@ import { useRoute } from 'vue-router'
 import { TranGlossaryItemApi, TranGlossaryItem } from '@/api/ai/translation/glossary/item'
 import TranGlossaryItemForm from './components/TranGlossaryItemForm.vue'
 import TranGlossaryItemImportForm from './components/TranGlossaryItemImportForm.vue'
+import { processDownloadUrl } from '@/utils/downloadHelper'
 
 /** 术语项管理 列表 */
 defineOptions({ name: 'TranGlossaryItem' })
@@ -171,19 +172,20 @@ const handleDownloadTemplate = async () => {
     // 调用RPC接口获取模板文件信息
     const res = await TranGlossaryItemApi.getTemplateUrl('GlossaryTemplate')
     console.log('模板查询结果:', res)
-    
+
     // request拦截器已经解包了CommonResult，res就是data字段的内容
     if (res && res.url && res.name) {
       // 使用原始文件名下载，去掉时间戳后缀
       const fileName = res.name
-      
+
       // 通过 fetch 获取文件内容
-      const response = await fetch(res.url)
+      const processedUrl = processDownloadUrl(res.url)
+      const response = await fetch(processedUrl)
       if (!response.ok) {
         throw new Error('文件下载失败')
       }
       const blob = await response.blob()
-      
+
       // 创建下载链接
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement('a')
@@ -191,11 +193,11 @@ const handleDownloadTemplate = async () => {
       link.download = fileName // 指定文件名
       document.body.appendChild(link)
       link.click()
-      
+
       // 清理
       document.body.removeChild(link)
       window.URL.revokeObjectURL(url)
-      
+
       message.success('模板下载成功')
     } else {
       console.warn('未找到模板文件，返回数据:', res)

@@ -27,7 +27,7 @@ public class SiliconFlowChatModelTests {
     private final DeepSeekChatModel openAiChatModel = DeepSeekChatModel.builder()
             .deepSeekApi(DeepSeekApi.builder()
                     .baseUrl(SiliconFlowApiConstants.DEFAULT_BASE_URL)
-                    .apiKey("test-key-not-configured") // apiKey
+                    .apiKey("test-api-key") // apiKey
                     .build())
             .defaultOptions(DeepSeekChatOptions.builder()
                     .model(SiliconFlowApiConstants.MODEL_DEFAULT) // 模型

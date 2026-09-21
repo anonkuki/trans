@@ -31,6 +31,7 @@ export interface AiWritePageReqVO extends PageParam {
 export interface AiWriteRespVo {
   id: number
   userId: number
+  userName: string
   type: number
   platform: string
   model: string

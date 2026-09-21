@@ -122,8 +122,8 @@ public class MenuController {
             throw exception(new ErrorCode(10001,"获取用户信息失败"));
         }
 
-        // 1.2 获得角色列表
-        Set<Long> roleIds = permissionService.getUserRoleIdListByUserId(getLoginUserId());
+        // 1.2 获得角色列表（包含直接分配和部门继承的角色，与登录后菜单可见范围保持一致）
+        Set<Long> roleIds = permissionService.getLoginUserAllRoleIds(getLoginUserId());
         if (CollUtil.isEmpty(roleIds)) {
             throw exception(new ErrorCode(10002,"获取用户角色失败"));
         }

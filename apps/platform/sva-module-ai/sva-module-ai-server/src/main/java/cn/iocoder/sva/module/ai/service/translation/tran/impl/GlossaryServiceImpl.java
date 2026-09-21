@@ -46,6 +46,8 @@ public class GlossaryServiceImpl implements GlossaryService {
     private static final Pattern CJK_PATTERN = Pattern.compile("[\\u4e00-\\u9fff]");
     /** CJK或字母数字正则（用于首字符索引分桶） */
     private static final Pattern CJK_ALNUM_PATTERN = Pattern.compile("[A-Za-z0-9\\u4e00-\\u9fff]");
+    /** 连续英文单词正则 */
+    private static final Pattern WORD_PATTERN = Pattern.compile("[A-Za-z]+");
 
     public GlossaryServiceImpl(TransDocProperties properties) {
         this.properties = properties;
@@ -63,7 +65,7 @@ public class GlossaryServiceImpl implements GlossaryService {
 
         String content = null;
         Path filePath = Paths.get(path);
-        
+
         // 首先尝试从文件系统加载
         if (Files.exists(filePath)) {
             try {
@@ -73,7 +75,7 @@ public class GlossaryServiceImpl implements GlossaryService {
                 log.warn("读取文件系统术语库失败: {}", e.getMessage());
             }
         }
-        
+
         // 如果文件系统不存在，尝试从 classpath 加载
         if (content == null) {
             try (InputStream is = getClass().getClassLoader().getResourceAsStream(path)) {
@@ -201,20 +203,20 @@ public class GlossaryServiceImpl implements GlossaryService {
             // 使用 Apache POI 读取 Excel
             org.apache.poi.ss.usermodel.Workbook wb = org.apache.poi.ss.usermodel.WorkbookFactory.create(
                     new FileInputStream(excelPath));
-            
+
             Map<String, String> terms = new HashMap<>();
-            
+
             for (int i = 0; i < wb.getNumberOfSheets(); i++) {
                 org.apache.poi.ss.usermodel.Sheet sheet = wb.getSheetAt(i);
                 for (org.apache.poi.ss.usermodel.Row row : sheet) {
                     org.apache.poi.ss.usermodel.Cell sourceCell = row.getCell(0);
                     org.apache.poi.ss.usermodel.Cell targetCell = row.getCell(1);
-                    
+
                     if (sourceCell != null && targetCell != null) {
                         String source = getCellValueAsString(sourceCell);
                         String target = getCellValueAsString(targetCell);
-                        
-                        if (source != null && !source.trim().isEmpty() 
+
+                        if (source != null && !source.trim().isEmpty()
                                 && target != null && !target.trim().isEmpty()) {
                             terms.put(source.trim(), target.trim());
                         }
@@ -222,20 +224,20 @@ public class GlossaryServiceImpl implements GlossaryService {
                 }
             }
             wb.close();
-            
+
             if (!terms.isEmpty()) {
                 int count = mergeGlossary(terms);
                 log.info("从 Excel 导入 {} 条术语", count);
                 return count;
             }
             return 0;
-            
+
         } catch (Exception e) {
             log.error("导入 Excel 术语失败: {}", e.getMessage(), e);
             throw new RuntimeException("导入 Excel 失败: " + e.getMessage(), e);
         }
     }
-    
+
     /**
      * 获取单元格的字符串值
      */
@@ -269,8 +271,8 @@ public class GlossaryServiceImpl implements GlossaryService {
         int totalClean = text.replaceAll("\\s+", "").length();
 
         // 核心优化：大表 → 候选子集
-        // 注意：不清空缓存，让索引正常构建，因为传入的 glossary 已经是最新的
         List<Map.Entry<String, String>> candidates = getCandidatePairs(glossary, text);
+
         if (candidates.isEmpty()) {
             return new ReplaceResult(text, 0, totalClean);
         }
@@ -282,7 +284,7 @@ public class GlossaryServiceImpl implements GlossaryService {
             String value = entry.getValue();
 
             if (CJK_PATTERN.matcher(key).find()) {
-                // 含中文术语：按"去空白视图"匹配
+                // 含中文术语：按“去空白视图”匹配
                 for (int[] range : findCjkWsInsensitiveMatches(text, key)) {
                     matches.add(new MatchInfo(range[0], range[1], range[1] - range[0], key, value));
                 }
@@ -331,7 +333,9 @@ public class GlossaryServiceImpl implements GlossaryService {
 
         for (MatchInfo m : chosen) {
             replaced.replace(m.start, m.end, m.target);
-            covered += m.length;
+            // 计算去空格后的覆盖长度
+            String matchedText = text.substring(m.start, m.end);
+            covered += matchedText.replaceAll("\\s+", "").length();
         }
 
         return new ReplaceResult(replaced.toString(), covered, totalClean);
@@ -484,15 +488,27 @@ public class GlossaryServiceImpl implements GlossaryService {
             list.sort((a, b) -> Integer.compare(b.getKey().length(), a.getKey().length()));
         }
 
+        log.debug("[buildLeadingIndex] 术语库索引构建完成，共 {} 个字符桶", index.size());
+
         return index;
     }
 
     /**
      * 获取术语的首字符桶
+     * <p>
+     * 对于英文术语，统一使用小写首字母作为桶 key，确保大小写不敏感匹配
      */
     private String getBucket(String key) {
         Matcher m = CJK_ALNUM_PATTERN.matcher(key);
-        return m.find() ? String.valueOf(m.group().charAt(0)) : "#";
+        if (m.find()) {
+            char firstChar = m.group().charAt(0);
+            // 英文字母统一转为小写，中文和数字保持不变
+            if (Character.isLetter(firstChar) && firstChar <= 127) {
+                return String.valueOf(Character.toLowerCase(firstChar));
+            }
+            return String.valueOf(firstChar);
+        }
+        return "#";
     }
 
     /**
@@ -506,12 +522,36 @@ public class GlossaryServiceImpl implements GlossaryService {
         // 每次调用都重新构建索引，确保使用最新的术语库数据
         Map<String, List<Map.Entry<String, String>>> index = buildLeadingIndex(glossary);
 
-        // 提取文本中的相关字符集合
-        Matcher m = CJK_ALNUM_PATTERN.matcher(text);
+        // 提取文本中的相关字符集合（优化：英文提取完整单词的首字母）
         Set<String> chars = new HashSet<>();
-        while (m.find() && chars.size() < 80) {
-            chars.add(m.group());
+        int maxChars = 80;
+
+        // 先检查文本是否包含中文
+        boolean hasChinese = CJK_PATTERN.matcher(text).find();
+
+        if (hasChinese) {
+            // 中文文本：提取单个中文字符和数字
+            Matcher m = CJK_ALNUM_PATTERN.matcher(text);
+            while (m.find() && chars.size() < maxChars) {
+                chars.add(m.group());
+            }
+        } else {
+            // 英文文本：提取单词首字母（更高效）
+            Matcher wordMatcher = WORD_PATTERN.matcher(text);
+            while (wordMatcher.find() && chars.size() < maxChars) {
+                String word = wordMatcher.group();
+                if (!word.isEmpty()) {
+                    char firstChar = word.charAt(0);
+                    // 添加小写形式
+                    chars.add(String.valueOf(Character.toLowerCase(firstChar)));
+                    // 如果有空间，也添加大写形式
+                    if (chars.size() < maxChars) {
+                        chars.add(String.valueOf(Character.toUpperCase(firstChar)));
+                    }
+                }
+            }
         }
+
         if (chars.isEmpty()) {
             chars.add("#");
         }

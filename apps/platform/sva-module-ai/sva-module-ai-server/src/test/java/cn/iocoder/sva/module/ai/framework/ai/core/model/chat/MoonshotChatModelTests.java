@@ -24,7 +24,7 @@ public class MoonshotChatModelTests {
 
     private final MoonshotChatModel chatModel = MoonshotChatModel.builder()
             .moonshotApi(MoonshotApi.builder()
-                    .apiKey("test-key-not-configured") // 密钥
+                    .apiKey("test-api-key") // 密钥
                     .build())
             .defaultOptions(MoonshotChatOptions.builder()
                     .model("kimi-k2-0711-preview") // 模型

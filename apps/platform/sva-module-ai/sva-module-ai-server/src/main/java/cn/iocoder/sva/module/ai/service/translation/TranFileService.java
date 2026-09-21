@@ -84,6 +84,11 @@ public interface TranFileService {
     TranFileDO getTranFile(Long id);
 
     /**
+     * 获得当前登录用户可访问的翻译文件；超级管理员可访问全部记录。
+     */
+    TranFileDO getTranFileForCurrentUser(Long id);
+
+    /**
      * 获得AI翻译文件信息分页
      *
      * @param pageReqVO 分页查询

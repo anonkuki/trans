@@ -1,7 +1,10 @@
 package cn.iocoder.sva.module.ai.service.translation.tran.impl;
 
+import cn.iocoder.sva.module.ai.dal.dataobject.model.AiChatRoleDO;
+import cn.iocoder.sva.module.ai.service.model.AiChatRoleService;
 import cn.iocoder.sva.module.ai.service.translation.tran.LlmClientService;
 import cn.iocoder.sva.module.ai.service.translation.tran.QcService;
+import cn.iocoder.sva.module.ai.service.translation.tran.context.PromptContext;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
@@ -28,6 +31,12 @@ import java.util.regex.Pattern;
 public class QcServiceImpl implements QcService {
 
     private final LlmClientService llmClient;
+    private final AiChatRoleService chatRoleService;
+
+    /** QC 流利度检查角色类别 */
+    private static final String QC_FLUENCY_CATEGORY = "QCFluency";
+    /** QC GMP 检查角色类别 */
+    private static final String QC_GMP_CATEGORY = "QCGMP";
 
     /** 数字匹配正则 */
     private static final List<Pattern> NUMBER_PATTERNS = Arrays.asList(
@@ -60,8 +69,9 @@ public class QcServiceImpl implements QcService {
     private static final Pattern RE_VACC = Pattern.compile(
             "\\b(?:Dose\\s*\\d+|Injection\\s*\\d+|Shot\\s*\\d+)\\b", Pattern.CASE_INSENSITIVE);
 
-    public QcServiceImpl(LlmClientService llmClient) {
+    public QcServiceImpl(LlmClientService llmClient, AiChatRoleService chatRoleService) {
         this.llmClient = llmClient;
+        this.chatRoleService = chatRoleService;
     }
 
     // ===================== 主入口 =====================
@@ -84,9 +94,19 @@ public class QcServiceImpl implements QcService {
             // 提交流利度扫描任务
             Future<QcReport> fluencyFuture = executor.submit(() -> {
                 try {
-                    return runFluencyScan(tgtPath);
+                    // 【关键】从数据库查询 QC 流利度检查提示词
+                    String fluencyPrompt = getQcPromptByCategory(QC_FLUENCY_CATEGORY);
+                    PromptContext.set(fluencyPrompt);
+                    log.info("[QC-流利度扫描-子线程] 设置专用提示词，来源: 数据库");
+
+                    QcReport result = runFluencyScan(tgtPath);
+
+                    // 清除上下文
+                    PromptContext.clear();
+                    return result;
                 } catch (Exception e) {
                     log.warn("流利度扫描失败: {}", e.getMessage());
+                    PromptContext.clear();
                     return new QcReport("extras.v1", Map.of("issues_count", 0), Collections.emptyList());
                 }
             });
@@ -94,9 +114,19 @@ public class QcServiceImpl implements QcService {
             // 提交 LLM QC 任务
             Future<QcReport> llmQcFuture = executor.submit(() -> {
                 try {
-                    return runLlmQc(srcPath, tgtPath);
+                    // 【关键】从数据库查询 QC GMP 检查提示词
+                    String gmpPrompt = getQcPromptByCategory(QC_GMP_CATEGORY);
+                    PromptContext.set(gmpPrompt);
+                    log.info("[QC-LLM检查-子线程] 设置专用提示词，来源: 数据库");
+
+                    QcReport result = runLlmQc(srcPath, tgtPath);
+
+                    // 清除上下文
+                    PromptContext.clear();
+                    return result;
                 } catch (Exception e) {
                     log.warn("LLM QC 失败: {}", e.getMessage());
+                    PromptContext.clear();
                     return new QcReport("qc.v1", Map.of("issues_count", 0), Collections.emptyList());
                 }
             });
@@ -288,12 +318,15 @@ public class QcServiceImpl implements QcService {
             // 分块处理
             List<List<int[]>> chunks = chunkParagraphs(texts, 7000);
 
-            String sysPrompt = "You are a professional scientific copy editor. " +
-                    "Read the following English paragraphs and find only clear fluency/coherence/style problems.\n" +
-                    "- Do NOT rewrite the text. Report problems with short evidence and a concise suggestion.\n" +
-                    "- Focus on grammar errors, broken sentences, awkward phrasing, tense/voice conflicts.\n" +
-                    "- Output JSON array of issues with fields: id, category='fluency', severity, evidence, suggestion.\n" +
-                    "- If no issues, return [].";
+            // 【注意】提示词已在主线程的并行任务中通过 PromptContext.set() 设置，此处无需重复设置
+            // 如果直接调用此方法（非并行），则需要在此处设置
+            if (PromptContext.get() == null) {
+                String sysPrompt = getQcPromptByCategory(QC_FLUENCY_CATEGORY);
+                PromptContext.set(sysPrompt);
+                log.info("[QC-流利度扫描] 使用专用提示词:\n{}", sysPrompt);
+            } else {
+                log.debug("[QC-流利度扫描] 提示词已由上层设置");
+            }
 
             for (List<int[]> chunk : chunks) {
                 StringBuilder payload = new StringBuilder("[");
@@ -330,6 +363,10 @@ public class QcServiceImpl implements QcService {
 
         } catch (Exception e) {
             log.error("流利度扫描失败: {}", e.getMessage());
+        } finally {
+            // 【注意】不清除上下文，由调用方（并行任务）负责清除
+            // 如果是直接调用此方法，则需要在外部清除
+            log.debug("[QC-流利度扫描] 方法执行完成");
         }
 
         Map<String, Object> stats = new HashMap<>();
@@ -361,9 +398,15 @@ public class QcServiceImpl implements QcService {
             }
             pairs.append("]");
 
-            String sysPrompt = "你是临床文件质量审校助手，请严格检查源文(src)与译文(tgt)在数字、比例、CI、单位、术语一致性方面的问题。\n" +
-                    "禁止改写译文。只输出符合 JSON Schema 的结果。\n" +
-                    "输出JSON格式：{'version':'qc.v1','stats':{'issues_count':N},'issues':[{'id':..,'category':..,'severity':..,'src':..,'tgt':..,'evidence':..}]}";
+            // 【注意】提示词已在主线程的并行任务中通过 PromptContext.set() 设置，此处无需重复设置
+            // 如果直接调用此方法（非并行），则需要在此处设置
+            if (PromptContext.get() == null) {
+                String sysPrompt = getQcPromptByCategory(QC_GMP_CATEGORY);
+                PromptContext.set(sysPrompt);
+                log.info("[QC-LLM检查] 使用专用提示词:\n{}", sysPrompt);
+            } else {
+                log.debug("[QC-LLM检查] 提示词已由上层设置");
+            }
 
             String payload = pairs.toString();
             if (payload.length() > 8000) {
@@ -387,6 +430,10 @@ public class QcServiceImpl implements QcService {
 
         } catch (Exception e) {
             log.error("LLM QC 失败: {}", e.getMessage());
+        } finally {
+            // 【注意】不清除上下文，由调用方（并行任务）负责清除
+            // 如果是直接调用此方法，则需要在外部清除
+            log.debug("[QC-LLM检查] 方法执行完成");
         }
 
         Map<String, Object> stats = new HashMap<>();
@@ -595,6 +642,71 @@ public class QcServiceImpl implements QcService {
 
         } catch (Exception e) {
             log.error("写入 QC 报告失败: {}", e.getMessage());
+        }
+    }
+
+    // ===================== 私有方法 =====================
+
+    /**
+     * 根据角色类别从数据库查询 QC 提示词
+     * <p>
+     * 查询逻辑：根据 category 查询列表，取第一个角色的 systemMessage
+     *
+     * @param category 角色类别（如 "QCFluency" 或 "QCGMP"）
+     * @return 系统提示词，如果未找到则返回默认提示词
+     */
+    private String getQcPromptByCategory(String category) {
+        try {
+            // 1. 根据类别查询角色列表
+            List<AiChatRoleDO> roles = chatRoleService.getChatRoleListByCategory(category);
+
+            if (roles != null && !roles.isEmpty()) {
+                // 2. 取第一个角色
+                AiChatRoleDO role = roles.get(0);
+
+                // 3. 检查是否有 systemMessage
+                if (role.getSystemMessage() != null && !role.getSystemMessage().isEmpty()) {
+                    log.info("[getQcPromptByCategory] 从数据库加载 QC 提示词: category={}, roleId={}, roleName={}",
+                            category, role.getId(), role.getName());
+                    return role.getSystemMessage();
+                } else {
+                    log.warn("[getQcPromptByCategory] 角色存在但没有 systemMessage: category={}, roleId={}",
+                            category, role.getId());
+                }
+            } else {
+                log.warn("[getQcPromptByCategory] 未找到类别为 {} 的角色", category);
+            }
+        } catch (Exception e) {
+            log.error("[getQcPromptByCategory] 从数据库加载 QC 提示词失败: category={}", category, e);
+        }
+
+        // 4. 如果查询失败，返回默认提示词
+        log.warn("[getQcPromptByCategory] 使用默认 QC 提示词: category={}", category);
+        return getDefaultQcPrompt(category);
+    }
+
+    /**
+     * 获取默认 QC 提示词（降级方案）
+     *
+     * @param category 角色类别
+     * @return 默认提示词
+     */
+    private String getDefaultQcPrompt(String category) {
+        if (QC_FLUENCY_CATEGORY.equals(category)) {
+            return "You are a professional scientific copy editor. " +
+                    "Read the following English paragraphs and find only clear fluency/coherence/style problems.\n" +
+                    "- Do NOT rewrite the text. Report problems with short evidence and a concise suggestion.\n" +
+                    "- Focus on grammar errors, broken sentences, awkward phrasing, tense/voice conflicts.\n" +
+                    "- Output JSON array of issues with fields: id, category='fluency', severity, evidence, suggestion.\n" +
+                    "- If no issues, return [].";
+        } else if (QC_GMP_CATEGORY.equals(category)) {
+            return "你是GMP环境下的专业质量审校助手。请严格按照GMP原则（数据完整性、可追溯性、准确性）检查源文(src)与译文(tgt)在以下方面的问题：数字、单位、量值范围、比例、术语一致性。\n" +
+                    "禁止改写译文。禁止添加主观评价。仅输出符合下方JSON Schema的结构化结果。\n" +
+                    "每个问题必须提供客观证据(src/tgt片段)，并给出基于GMP规范的建议。\n" +
+                    "输出JSON格式：{'version':'gmp.qc.v1','stats':{'issues_count':N},'issues':[{'id':..,'category':..,'severity':..,'src':..,'tgt':..,'evidence':..,'gmp_reference':..}]}";
+        } else {
+            log.warn("[getDefaultQcPrompt] 未知的 QC 类别: {}", category);
+            return "";
         }
     }
 }

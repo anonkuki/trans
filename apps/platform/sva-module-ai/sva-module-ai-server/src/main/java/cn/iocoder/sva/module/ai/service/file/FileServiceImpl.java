@@ -83,10 +83,12 @@ public class FileServiceImpl implements FileService {
 
         // 2.1 生成上传的 path，需要保证唯一
         String path = generateUploadPath(name, directory);
+        log.info("[createFile] 原始文件名: {}, 生成上传路径: {}", name, path);
         // 2.2 上传到文件存储器
         FileClient client = fileConfigService.getMasterFileClient();
         Assert.notNull(client, "客户端(master) 不能为空");
         String url = client.upload(content, path, type);
+        log.info("[createFile] 上传完成，返回 URL: {}", url);
 
         // 3. 保存到数据库
         fileMapper.insert(new FileDO().setConfigId(client.getId())
@@ -198,14 +200,14 @@ public class FileServiceImpl implements FileService {
             log.warn("[deleteFileByUrl] URL 为空，跳过删除");
             return;
         }
-        
+
         FileClient client = fileConfigService.getMasterFileClient();
         Assert.notNull(client, "客户端(master) 不能为空");
-        
+
         String path = extractPathFromUrl(url);
         log.info("[deleteFileByUrl] 原始 URL: {}", url);
         log.info("[deleteFileByUrl] 提取的路径: {}", path);
-        
+
         if (StrUtil.isNotBlank(path)) {
             try {
                 client.delete(path);
@@ -222,7 +224,7 @@ public class FileServiceImpl implements FileService {
     /**
      * 从完整 URL 中提取文件路径
      * 例如: http://127.0.0.1:9000/svaai/translation/output/file.txt -> translation/output/file.txt
-     * 
+     *
      * @param url 完整的文件 URL
      * @return 文件路径（相对路径，不包含 bucket）
      */
@@ -231,7 +233,7 @@ public class FileServiceImpl implements FileService {
             if (StrUtil.isBlank(url)) {
                 return null;
             }
-            
+
             // 如果 URL 以 http:// 或 https:// 开头，需要提取域名后面的部分
             if (url.startsWith("http://") || url.startsWith("https://")) {
                 // 找到协议分隔符的位置
@@ -240,37 +242,45 @@ public class FileServiceImpl implements FileService {
                     log.warn("[extractPathFromUrl] URL 格式不正确，未找到协议分隔符: {}", url);
                     return null;
                 }
-                
+
                 // 从协议后面开始查找第一个斜杠（即 host:port/bucket 后面的斜杠）
                 int pathStartIndex = url.indexOf('/', protocolEndIndex + 3);
                 if (pathStartIndex == -1) {
                     log.warn("[extractPathFromUrl] URL 格式不正确，未找到路径分隔符: {}", url);
                     return null;
                 }
-                
+
                 // 提取路径部分（去掉开头的斜杠），此时格式为: bucket/path/to/file
                 String bucketAndPath = url.substring(pathStartIndex + 1);
-                
+
                 // 移除 URL 查询参数（? 后面的部分）
                 int queryIndex = bucketAndPath.indexOf('?');
                 if (queryIndex != -1) {
                     bucketAndPath = bucketAndPath.substring(0, queryIndex);
                 }
-                
+
                 // 从 bucketAndPath 中提取真正的路径（去掉 bucket 前缀）
                 // 格式: svaai/translation/input/file.xlsx -> translation/input/file.xlsx
                 int firstSlashIndex = bucketAndPath.indexOf('/');
                 if (firstSlashIndex != -1) {
                     String path = bucketAndPath.substring(firstSlashIndex + 1);
+
+                    // 移除可能的 "file/" 前缀（如果 URL 中包含额外的路径前缀）
+                    // 例如: file/translation/output/... -> translation/output/...
+                    if (path.startsWith("file/")) {
+                        path = path.substring(5); // 去掉 "file/"
+                        log.debug("[extractPathFromUrl] 移除 file/ 前缀后的路径: {}", path);
+                    }
+
                     log.debug("[extractPathFromUrl] 从 URL 提取路径: {} -> {}", url, path);
                     return StrUtil.isNotBlank(path) ? path : null;
                 }
-                
+
                 // 如果没有斜杠，说明只有 bucket 没有路径
                 log.warn("[extractPathFromUrl] URL 中没有文件路径，只有 bucket: {}", bucketAndPath);
                 return null;
             }
-            
+
             // 如果已经是相对路径，尝试去掉可能的 bucket 前缀
             int firstSlashIndex = url.indexOf('/');
             if (firstSlashIndex != -1) {
@@ -278,7 +288,7 @@ public class FileServiceImpl implements FileService {
                 log.debug("[extractPathFromUrl] 从相对路径提取: {} -> {}", url, path);
                 return path;
             }
-            
+
             log.debug("[extractPathFromUrl] 使用相对路径: {}", url);
             return url;
         } catch (Exception e) {
@@ -300,6 +310,25 @@ public class FileServiceImpl implements FileService {
         FileClient client = fileConfigService.getFileClient(configId);
         Assert.notNull(client, "客户端({}) 不能为空", configId);
         return client.getContent(path);
+    }
+
+    @Override
+    public byte[] getFileContentByUrl(String url) throws Exception {
+        FileClient client = fileConfigService.getMasterFileClient();
+        Assert.notNull(client, "客户端(master) 不能为空");
+        String path = extractPathFromUrl(url);
+        Assert.notNull(path, "从 URL 提取文件路径失败: {}", url);
+
+        log.info("[getFileContentByUrl] 原始 URL: {}", url);
+        log.info("[getFileContentByUrl] 提取的路径: {}", path);
+
+        // 使用 HttpUtils.decodeUrlPath 安全解码路径，它能正确处理文件名中的裸 % 字符
+        // 例如: 6%汉译英 -> 保持为 6%汉译英（不会因 %汉 不是合法编码而报错）
+        String decodedPath = HttpUtils.decodeUrlPath(path);
+        log.info("[getFileContentByUrl] URL 解码后的路径: {}", decodedPath);
+        log.info("[getFileContentByUrl] 路径是否相同: {}", path.equals(decodedPath));
+
+        return client.getContent(decodedPath);
     }
 
 }

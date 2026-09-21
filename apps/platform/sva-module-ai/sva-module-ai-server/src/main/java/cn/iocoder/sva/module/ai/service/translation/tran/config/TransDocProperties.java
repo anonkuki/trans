@@ -52,6 +52,12 @@ public class TransDocProperties {
     private Duration pythonReadTimeout = Duration.ofMinutes(31);
 
     /**
+     * Whether a failed Python OCR request may fall back to PDFBox. Disabled by default so
+     * authentication, transport, or schema errors cannot silently change recognition behavior.
+     */
+    private boolean pythonFallbackEnabled = false;
+
+    /**
      * 默认翻译角色名称（从 Nacos 配置中心获取）
      * 如果前端未传入 roleId，则使用此角色名称查询角色并获取提示词
      */

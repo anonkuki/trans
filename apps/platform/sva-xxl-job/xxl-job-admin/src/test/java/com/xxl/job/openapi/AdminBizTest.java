@@ -26,7 +26,7 @@ public class AdminBizTest {
     private static final Logger logger = LoggerFactory.getLogger(AdminBizTest.class);
 
     private static String addressUrl = "http://127.0.0.1:8080/xxl-job-admin";
-    private static String accessToken = "default_token";
+    private static String accessToken = "test-credential";
 
     private AdminBiz buildClient(){
         String finalUrl = addressUrl + "/api";

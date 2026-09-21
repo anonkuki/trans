@@ -1,3 +1,5 @@
+import { processDownloadUrl } from './downloadHelper'
+
 const download0 = (data: Blob, fileName: string, mineType: string) => {
   // 创建 blob
   const blob = new Blob([data], { type: mineType })
@@ -39,8 +41,10 @@ const download = {
   },
   // 通过 URL 下载文件
   url: (url: string, fileName: string) => {
+    // 处理下载URL：如果当前访问的是IP地址，则将下载链接的域名也替换为该IP
+    const processedUrl = processDownloadUrl(url)
     const a = document.createElement('a')
-    a.href = url
+    a.href = processedUrl
     a.download = fileName
     a.click()
   },

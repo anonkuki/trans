@@ -28,7 +28,6 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.validation.annotation.Validated;
@@ -39,6 +38,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -123,24 +123,20 @@ public class TranServiceImpl implements TranService {
         taskManager.setEnableQc(taskId, reqVO.isEnableQc());
 
         try {
-            // 如果启用了术语替换且指定了术语库ID，则从数据库查询术语库条目
+            // 如果启用了术语替换且指定了术语库ID列表，则从数据库查询多个术语库条目并合并
             List<TranGlossaryItemDO> glossaryItems = null;
-            if (reqVO.getGlossaryId() != null && reqVO.isUseGlossaryReplace()) {
-                // 数据库查询：根据术语库ID查询所有术语条目
-                glossaryItems = tranGlossaryItemService.getTranGlossaryItemListByGlossaryId(reqVO.getGlossaryId());
-                log.info("[translate][taskId={}] 实时查询术语库 {} 的 {} 条术语",
-                        taskId, reqVO.getGlossaryId(), glossaryItems != null ? glossaryItems.size() : 0);
-
-                // 打印术语详情，用于调试
-//                if (glossaryItems != null && !glossaryItems.isEmpty()) {
-//                    log.info("[translate][taskId={}] ===== 术语库详情开始 =====", taskId);
-//                    glossaryItems.forEach(item ->
-//                        log.info("[术语项] source='{}', target='{}'",
-//                            item.getSourceLanguage(), item.getTargetLanguage())
-//                    );
+            if (reqVO.getGlossaryIds() != null && !reqVO.getGlossaryIds().isEmpty() && reqVO.isUseGlossaryReplace()) {
+                // 数据库查询：根据多个术语库ID查询所有术语条目并合并
+                glossaryItems = mergeGlossaryItemsFromMultipleGlossaries(reqVO.getGlossaryIds());
+                log.info("[translate][taskId={}] 从 {} 个术语库中合并了 {} 条术语",
+                        taskId, reqVO.getGlossaryIds().size(), glossaryItems != null ? glossaryItems.size() : 0);
+            } else {
+                log.info("[translate][taskId={}] 未启用术语替换或未指定术语库: glossaryIds={}, useGlossaryReplace={}",
+                        taskId, reqVO.getGlossaryIds(), reqVO.isUseGlossaryReplace());
+            }
 //                    log.info("[translate][taskId={}] ===== 术语库详情结束 =====", taskId);
 //                }
-            }
+//            }
 
             // 读取上传的文件
             MultipartFile file = reqVO.getFile();
@@ -149,6 +145,12 @@ public class TranServiceImpl implements TranService {
 
             // 读取文件内容为字节数组
             byte[] fileContent = IoUtil.readBytes(file.getInputStream());
+
+            // 检查文件是否为空
+            if (fileContent == null || fileContent.length == 0) {
+                log.error("[translate][taskId={}] 上传的文件为空", taskId);
+                throw new IllegalArgumentException("无法翻译空文档，请上传包含有效内容的文档");
+            }
 
             // 文件上传：将原文件上传到 MinIO 对象存储
             String minioUrl = fileHelper.uploadToMinio(fileContent, origName, "translation/input");
@@ -193,7 +195,8 @@ public class TranServiceImpl implements TranService {
      * 下载翻译结果文件
      * <p>
      * 根据任务ID和文件类型，从数据库查询文件记录，获取对应的 MinIO URL，
-     * 然后生成预签名 URL 并重定向到该 URL 进行下载。
+     * 后端直接从 MinIO 读取文件内容并返回给前端，避免前端直接请求 MinIO
+     * 导致文件名中的特殊字符（如 %）被浏览器重新编码而签名失效。
      * <p>
      * 支持的文件类型：
      * - file: 翻译后的文档
@@ -203,7 +206,7 @@ public class TranServiceImpl implements TranService {
      *
      * @param taskId 任务ID
      * @param fileType 文件类型（file/excel/qc/contrast）
-     * @return HTTP 响应，重定向到 MinIO 预签名 URL
+     * @return HTTP 响应，包含文件流和 Content-Disposition 头
      */
     @Override
     public ResponseEntity<Resource> downloadFile(String taskId, String fileType) {
@@ -245,17 +248,24 @@ public class TranServiceImpl implements TranService {
         }
 
         try {
-            // 生成 MinIO 预签名 URL（有效期1小时），用于临时访问私有文件
-            String presignedUrl = fileService.presignGetUrl(minioUrl, 3600);
-            log.info("[downloadFile] 生成预签名 URL: {}, 原始 URL: {}", presignedUrl, minioUrl);
+            // 后端直接从 MinIO 读取文件内容，避免前端直接请求 MinIO 导致特殊字符编码问题
+            log.info("[downloadFile] 开始从 MinIO 读取文件, taskId={}, fileType={}, minioUrl={}", taskId, fileType, minioUrl);
+            byte[] fileContent = fileService.getFileContentByUrl(minioUrl);
+            log.info("[downloadFile] 文件读取成功, 大小={} bytes, 文件名={}", fileContent.length, filename);
 
-            // 返回 302 重定向响应，让浏览器直接从 MinIO 下载文件
-            return ResponseEntity.status(HttpStatus.FOUND)
-                    .header(HttpHeaders.LOCATION, presignedUrl)
-                    .build();
+            // 构建响应：返回文件流 + Content-Disposition 头
+            // 使用 RFC 5987 编码文件名，支持中文和特殊字符（如 %）
+            String encodedFilename = java.net.URLEncoder.encode(filename, java.nio.charset.StandardCharsets.UTF_8)
+                    .replace("+", "%20");
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION,
+                            "attachment; filename=\"" + encodedFilename + "\"; filename*=UTF-8''" + encodedFilename)
+                    .header(HttpHeaders.CONTENT_TYPE, "application/octet-stream")
+                    .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(fileContent.length))
+                    .body(new org.springframework.core.io.ByteArrayResource(fileContent));
 
         } catch (Exception e) {
-            log.error("[downloadFile] 生成预签名 URL 失败, taskId={}, fileType={}, minioUrl={}",
+            log.error("[downloadFile] 下载文件失败, taskId={}, fileType={}, minioUrl={}",
                     taskId, fileType, minioUrl, e);
             return ResponseEntity.internalServerError().build();
         }
@@ -274,6 +284,19 @@ public class TranServiceImpl implements TranService {
     @Override
     public List<TranGlossaryDO> getVisibleGlossaryList(Long userId, String username, String targetLanguage) {
         return glossaryHelper.getVisibleGlossaryList(userId, username, targetLanguage);
+    }
+
+    /**
+     * 获取当前用户可编辑的术语库列表
+     *
+     * @param userId 用户ID
+     * @param username 用户名
+     * @param targetLanguage 目标语言
+     * @return 可编辑的术语库列表
+     */
+    @Override
+    public List<TranGlossaryDO> getEditableGlossaryList(Long userId, String username, String targetLanguage) {
+        return glossaryHelper.getEditableGlossaryList(userId, username, targetLanguage);
     }
 
     /**
@@ -306,14 +329,14 @@ public class TranServiceImpl implements TranService {
                 return result;
             }
 
-            log.info("[saveTerms] 保存术语: username={}, glossaryId={}, termCount={}", 
+            log.info("[saveTerms] 保存术语: username={}, glossaryId={}, termCount={}",
                     username, glossaryId, terms.size());
 
             // 校验用户是否有权限操作该术语库
             // 权限校验逻辑：用户角色包含术语库的所属角色，或者用户是术语库的所属人员
-            TranGlossaryDO glossary = 
+            TranGlossaryDO glossary =
                     glossaryHelper.getGlossaryById(glossaryId);
-            
+
             if (glossary == null) {
                 result.put("success", false);
                 result.put("message", "术语库不存在");
@@ -323,7 +346,7 @@ public class TranServiceImpl implements TranService {
             // 执行权限校验
             boolean hasPermission = glossaryHelper.checkGlossaryPermission(glossaryId, username);
             if (!hasPermission) {
-                log.warn("[saveTerms] 用户无权限操作该术语库: username={}, glossaryId={}, roleId={}, owner={}", 
+                log.warn("[saveTerms] 用户无权限操作该术语库: username={}, glossaryId={}, roleId={}, owner={}",
                         username, glossaryId, glossary.getRoleId(), glossary.getUsername());
                 result.put("success", false);
                 result.put("message", "权限不足，不能保存到该术语库");
@@ -337,7 +360,7 @@ public class TranServiceImpl implements TranService {
             result.put("count", savedCount);
             result.put("glossaryId", glossaryId);
             result.put("message", "术语保存成功");
-            
+
             log.info("[saveTerms] 术语保存成功: glossaryId={}, savedCount={}", glossaryId, savedCount);
 
         } catch (Exception e) {
@@ -442,7 +465,7 @@ public class TranServiceImpl implements TranService {
             username = "system";
             log.warn("[executeTranslationTask] 无法获取登录用户，使用默认用户名: {}", username);
         }
-        
+
         return executeTranslationTask(fileContent, fileName, targetLang, glossaryId,
                 useGlossaryReplace, strictFormat, enableComparison, enableQc,
                 modelId, disableCache, username, roleId);
@@ -499,20 +522,20 @@ public class TranServiceImpl implements TranService {
                     // 获取模型信息
                     AiModelDO modelDO = aiModelService.getModel(modelId);
                     ChatModel chatModel = aiModelService.getChatModel(modelId);
-                    
+
                     // 设置 ChatModelContext
                     ChatModelContext.set(chatModel);
-                    
+
                     // 设置 AiModelContext（包含模型代码）
-                    AiModelContext.ModelInfo modelInfo = 
+                    AiModelContext.ModelInfo modelInfo =
                         new AiModelContext.ModelInfo();
                     modelInfo.setModelId(modelId);
                     modelInfo.setModelName(modelDO.getName());
                     modelInfo.setModelCode(modelDO.getModel());  // 关键：设置实际的模型代码，如 deepseek-v3
                     modelInfo.setChatModel(chatModel);
                     AiModelContext.set(modelInfo);
-                    
-                    log.info("[executeTranslationTask][taskId={}] 成功设置自定义模型到 ThreadLocal, modelId={}, modelName={}, modelCode={}", 
+
+                    log.info("[executeTranslationTask][taskId={}] 成功设置自定义模型到 ThreadLocal, modelId={}, modelName={}, modelCode={}",
                             taskId, modelId, modelDO.getName(), modelDO.getModel());
                 } catch (Exception e) {
                     log.error("[executeTranslationTask][taskId={}] 获取自定义模型失败, modelId={}, 将使用默认模型", taskId, modelId, e);
@@ -558,7 +581,7 @@ public class TranServiceImpl implements TranService {
                 log.info("[executeTranslationTask][taskId={}] 翻译任务成功完成", taskId);
                 return true;
             } else {
-                log.error("[executeTranslationTask][taskId={}] 翻译任务失败，状态: {}", 
+                log.error("[executeTranslationTask][taskId={}] 翻译任务失败，状态: {}",
                         taskId, taskInfo != null ? taskInfo.getStatus() : "unknown");
                 return false;
             }
@@ -590,6 +613,7 @@ public class TranServiceImpl implements TranService {
         private boolean strictFormat;
         private boolean enableComparison;
         private boolean enableQc;
+        private boolean translationFirst;
         private Long modelId;
         private Integer disableCache;
         private Long roleId;
@@ -642,6 +666,14 @@ public class TranServiceImpl implements TranService {
             this.enableQc = enableQc;
         }
 
+        public boolean isTranslationFirst() {
+            return translationFirst;
+        }
+
+        public void setTranslationFirst(boolean translationFirst) {
+            this.translationFirst = translationFirst;
+        }
+
         public Long getModelId() {
             return modelId;
         }
@@ -665,6 +697,49 @@ public class TranServiceImpl implements TranService {
         public void setRoleId(Long roleId) {
             this.roleId = roleId;
         }
+    }
+
+    /**
+     * 从多个术语库中合并术语条目
+     * <p>
+     * 根据术语库ID列表，查询所有术语库的术语条目并合并。
+     * 如果不同术语库中有相同的源语言术语，后查询的术语库会覆盖前面的。
+     *
+     * @param glossaryIds 术语库ID列表
+     * @return 合并后的术语条目列表
+     */
+    private List<TranGlossaryItemDO> mergeGlossaryItemsFromMultipleGlossaries(List<Long> glossaryIds) {
+        if (glossaryIds == null || glossaryIds.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        // 使用 Map 来去重，key 为 glossaryId+sourceLanguage（同一术语库中的相同原文只保留一个）
+        Map<String, TranGlossaryItemDO> mergedMap = new LinkedHashMap<>();
+
+        for (Long glossaryId : glossaryIds) {
+            try {
+                // 查询单个术语库的所有术语条目
+                List<TranGlossaryItemDO> items = tranGlossaryItemService.getTranGlossaryItemListByGlossaryId(glossaryId);
+                if (items != null && !items.isEmpty()) {
+                    log.debug("[mergeGlossaryItems] 术语库 {} 有 {} 条术语", glossaryId, items.size());
+
+                    // 将术语添加到 Map 中，重复的会被覆盖
+                    for (TranGlossaryItemDO item : items) {
+                        // key: glossaryId + sourceLanguage，确保同一术语库中的相同原文术语只保留一个
+                        String key = glossaryId + "|" + item.getSourceLanguage();
+                        mergedMap.put(key, item);
+                    }
+                }
+            } catch (Exception e) {
+                log.error("[mergeGlossaryItems] 查询术语库 {} 失败", glossaryId, e);
+            }
+        }
+
+        List<TranGlossaryItemDO> mergedList = new ArrayList<>(mergedMap.values());
+        log.info("[mergeGlossaryItems] 从 {} 个术语库合并了 {} 条术语（去重后）",
+                glossaryIds.size(), mergedList.size());
+
+        return mergedList;
     }
 
     /**
@@ -710,20 +785,20 @@ public class TranServiceImpl implements TranService {
                     // 获取模型信息
                     AiModelDO modelDO = aiModelService.getModel(reqVO.getModelId());
                     ChatModel chatModel = aiModelService.getChatModel(reqVO.getModelId());
-                    
+
                     // 设置 ChatModelContext
                     ChatModelContext.set(chatModel);
-                    
+
                     // 设置 AiModelContext（包含模型代码）
-                    AiModelContext.ModelInfo modelInfo = 
+                    AiModelContext.ModelInfo modelInfo =
                         new AiModelContext.ModelInfo();
                     modelInfo.setModelId(reqVO.getModelId());
                     modelInfo.setModelName(modelDO.getName());
                     modelInfo.setModelCode(modelDO.getModel());  // 关键：设置实际的模型代码，如 deepseek-v3
                     modelInfo.setChatModel(chatModel);
                     AiModelContext.set(modelInfo);
-                    
-                    log.info("[runAsync][taskId={}] 成功设置自定义模型到 ThreadLocal, modelId={}, modelName={}, modelCode={}", 
+
+                    log.info("[runAsync][taskId={}] 成功设置自定义模型到 ThreadLocal, modelId={}, modelName={}, modelCode={}",
                             taskId, reqVO.getModelId(), modelDO.getName(), modelDO.getModel());
                 } catch (Exception e) {
                     log.error("[runAsync][taskId={}] 获取自定义模型失败, modelId={}, 将使用默认模型", taskId, reqVO.getModelId(), e);
@@ -739,8 +814,8 @@ public class TranServiceImpl implements TranService {
             // 构建并缓存提示词（只查询一次数据库）
             String systemPrompt = buildSystemPrompt(reqVO.getTargetLang(), reqVO.getRoleId());
             PromptContext.set(systemPrompt);
-            log.info("[runAsync][taskId={}] 已缓存系统提示词，长度: {}, 前100字符: {}", 
-                    taskId, systemPrompt.length(), 
+            log.info("[runAsync][taskId={}] 已缓存系统提示词，长度: {}, 前100字符: {}",
+                    taskId, systemPrompt.length(),
                     systemPrompt.substring(0, Math.min(100, systemPrompt.length())));
 
             TranslationCacheContext.set(shouldDisableCache);
@@ -792,11 +867,13 @@ public class TranServiceImpl implements TranService {
         // 将 TranTranslateReqVO 转换为 BackendTranslationParams
         BackendTranslationParams params = new BackendTranslationParams();
         params.setTargetLang(reqVO.getTargetLang());
-        params.setGlossaryId(reqVO.getGlossaryId());
+        // 注意：glossaryId 已不再使用，术语条目已在前面合并到 glossaryItems 中
+        // params.setGlossaryId(reqVO.getGlossaryId());
         params.setUseGlossaryReplace(reqVO.isUseGlossaryReplace());
         params.setStrictFormat(reqVO.isStrictFormat());
         params.setEnableComparison(reqVO.isEnableComparison());
         params.setEnableQc(reqVO.isEnableQc());
+        params.setTranslationFirst(reqVO.isTranslationFirst());
         params.setModelId(reqVO.getModelId());
         params.setDisableCache(reqVO.getDisableCache());
         params.setRoleId(reqVO.getRoleId());
@@ -889,7 +966,8 @@ public class TranServiceImpl implements TranService {
                 docxResult = docxTranslationService.processDocument(
                         tmpInputPath.toString(), tmpOutputPath.toString(), params.getTargetLang(),
                         params.isUseGlossaryReplace(), glossaryMap, progressCallback, textCallback,
-                        params.isStrictFormat(), params.isEnableQc(), params.isEnableComparison()
+                        params.isStrictFormat(), params.isEnableQc(), params.isEnableComparison(),
+                        params.isTranslationFirst()
                 );
                 outputPath = docxResult.getOutputPath();
 
@@ -912,12 +990,13 @@ public class TranServiceImpl implements TranService {
                 pdfResult = pdfTranslationService.processPdf(
                         tmpInputPath.toString(), tmpOutputPath.toString(), params.getTargetLang(),
                         params.isUseGlossaryReplace(), glossaryMap, progressCallback, textCallback,
-                        params.isStrictFormat(), params.isEnableQc(), params.isEnableComparison()
+                        params.isStrictFormat(), params.isEnableQc(), params.isEnableComparison(),
+                        params.isTranslationFirst()
                 );
                 outputPath = pdfResult.getOutputPath();
                 // PDF 翻译后转换为 DOCX 格式
                 ext = ".docx";
-                
+
                 // 如果启用了对照模式，获取对照文档路径
                 if (params.isEnableComparison() && pdfResult.getContrastPath() != null && !pdfResult.getContrastPath().isEmpty()) {
                     contrastPath = pdfResult.getContrastPath();
@@ -938,11 +1017,18 @@ public class TranServiceImpl implements TranService {
             // 根据严格格式选项确定文件名标签
             String modeTag = params.isStrictFormat() ? "strict" : "fast";
 
+            // 检查是否有错误信息（如加密文档等）
+            if (error != null && !error.isEmpty()) {
+                log.error("[runTranslationWithParams][taskId={}] 翻译过程出现错误: {}", taskId, error);
+                throw new IllegalStateException(error);
+            }
+
             // 文件上传：上传翻译后的文档到 MinIO
             if (!Files.exists(Paths.get(outputPath))) {
-                throw new IllegalStateException("翻译输出文件不存在: " + outputPath + "，翻译过程可能失败");
+                log.error("[runTranslationWithParams][taskId={}] 翻译输出文件不存在: {}", taskId, outputPath);
+                throw new IllegalStateException("翻译输出文件不存在，翻译过程可能失败");
             }
-            
+
             byte[] outputContent = fileHelper.readFileToBytes(outputPath);
             String outName = origBase + "_" + modeTag + ext;
             String translatedFileUrl = fileHelper.uploadToMinio(outputContent, outName, "translation/output");
@@ -1015,19 +1101,48 @@ public class TranServiceImpl implements TranService {
             fileHelper.updateFileRecord(fileId, null, null, null, null, 2);
 
         } finally {
-            Path[] pathsToDelete = {tmpInputPath, tmpOutputPath, tmpContrastPath, 
+            // 清理所有临时文件
+            Path[] pathsToDelete = {tmpInputPath, tmpOutputPath, tmpContrastPath,
                                     tmpComparePath, tmpQcPath};
+
+            log.debug("[runTranslationWithParams][taskId={}] 开始清理临时文件，共 {} 个", taskId, pathsToDelete.length);
+
+            int successCount = 0;
+            int failCount = 0;
+            int skipCount = 0;
+
             for (Path path : pathsToDelete) {
                 if (path != null) {
                     try {
-                        Files.deleteIfExists(path);
-                        log.debug("[runTranslationWithParams][taskId={}] 已删除临时文件: {}", taskId, path.getFileName());
+                        if (Files.exists(path)) {
+                            // 先获取文件大小，再删除
+                            long fileSize = Files.size(path);
+                            Files.delete(path);
+                            successCount++;
+                            log.debug("[runTranslationWithParams][taskId={}] ✅ 已删除临时文件: {} (大小: {} bytes)",
+                                    taskId, path.getFileName(), fileSize);
+                        } else {
+                            skipCount++;
+                            log.debug("[runTranslationWithParams][taskId={}] ⚠️  文件不存在，跳过: {}",
+                                    taskId, path.getFileName());
+                        }
+                    } catch (java.nio.file.NoSuchFileException e) {
+                        // 文件在检查和删除之间被其他进程删除了，这种情况视为跳过
+                        skipCount++;
+                        log.debug("[runTranslationWithParams][taskId={}] ⚠️  文件已被其他进程删除，跳过: {}",
+                                taskId, path.getFileName());
                     } catch (Exception e) {
-                        log.error("[runTranslationWithParams][taskId={}] 删除临时文件失败: {}", 
-                                 taskId, path, e);
+                        failCount++;
+                        log.error("[runTranslationWithParams][taskId={}] ❌ 删除临时文件失败: {}, 错误: {}",
+                                 taskId, path, e.getMessage(), e);
                     }
+                } else {
+                    skipCount++;
                 }
             }
+
+            log.info("[runTranslationWithParams][taskId={}] 临时文件清理完成 - 成功: {}, 失败: {}, 跳过: {}",
+                    taskId, successCount, failCount, skipCount);
 
             ChatModelContext.clear();
             log.debug("[runTranslationWithParams][taskId={}] 已清理 ThreadLocal 中的 ChatModel", taskId);
@@ -1236,7 +1351,7 @@ public class TranServiceImpl implements TranService {
             try {
                 AiChatRoleDO chatRole = chatRoleService.getChatRole(roleId);
                 if (chatRole != null && chatRole.getSystemMessage() != null && !chatRole.getSystemMessage().isEmpty()) {
-                    log.info("[buildSystemPrompt] 使用自定义角色提示词: roleId={}, roleName={}", 
+                    log.info("[buildSystemPrompt] 使用自定义角色提示词: roleId={}, roleName={}",
                             roleId, chatRole.getName());
                     String prompt = chatRole.getSystemMessage() + "\n\n目标语言：" + targetLanguage + "。";
                     log.info("[buildSystemPrompt] 最终提示词:\n{}", prompt);
@@ -1258,7 +1373,7 @@ public class TranServiceImpl implements TranService {
                 if (roles != null && !roles.isEmpty()) {
                     AiChatRoleDO chatRole = roles.get(0);
                     if (chatRole.getSystemMessage() != null && !chatRole.getSystemMessage().isEmpty()) {
-                        log.info("[buildSystemPrompt] 使用配置角色提示词: roleName={}, roleId={}", 
+                        log.info("[buildSystemPrompt] 使用配置角色提示词: roleName={}, roleId={}",
                                 roleName, chatRole.getId());
                         String prompt = chatRole.getSystemMessage() + "\n\n目标语言：" + targetLanguage + "。";
                         log.info("[buildSystemPrompt] 最终提示词:\n{}", prompt);

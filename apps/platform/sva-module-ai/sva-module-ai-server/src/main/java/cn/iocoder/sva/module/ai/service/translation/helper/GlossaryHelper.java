@@ -53,8 +53,9 @@ public class GlossaryHelper {
      * 校验用户是否有权限操作术语库
      * <p>
      * 权限校验规则（满足其一即可）：
-     * 1. 用户具备的角色包含该术语库的所属角色（roleId）
-     * 2. 用户是该术语库的所属人员（username）
+     * 1. 超级管理员：拥有所有术语库的操作权限
+     * 2. 用户具备的角色包含该术语库的所属角色（roleId）
+     * 3. 用户是该术语库的所属人员（username）
      *
      * @param glossaryId 术语库ID
      * @param username 当前登录用户名
@@ -87,10 +88,17 @@ public class GlossaryHelper {
             userRoleIds = new HashSet<>();
         }
 
+        // 规则0：超级管理员拥有所有术语库的操作权限
+        if (CollUtil.isNotEmpty(userRoleIds) && userRoleIds.contains(1L)) {
+            log.info("[checkGlossaryPermission] 超级管理员，允许操作: userId={}, glossaryId={}",
+                    userId, glossaryId);
+            return true;
+        }
+
         // 规则1：检查用户角色是否包含术语库的所属角色
         if (CollUtil.isNotEmpty(userRoleIds) && glossary.getRoleId() != null) {
             if (userRoleIds.contains(glossary.getRoleId())) {
-                log.info("[checkGlossaryPermission] 匹配所属角色，允许操作: userId={}, glossaryId={}, roleId={}", 
+                log.info("[checkGlossaryPermission] 匹配所属角色，允许操作: userId={}, glossaryId={}, roleId={}",
                         userId, glossaryId, glossary.getRoleId());
                 return true;
             }
@@ -100,14 +108,14 @@ public class GlossaryHelper {
         if (StrUtil.isNotBlank(glossary.getUsername()) &&
                 StrUtil.isNotBlank(username)) {
             if (glossary.getUsername().equals(username)) {
-                log.info("[checkGlossaryPermission] 匹配所属人员，允许操作: userId={}, glossaryId={}, username={}", 
+                log.info("[checkGlossaryPermission] 匹配所属人员，允许操作: userId={}, glossaryId={}, username={}",
                         userId, glossaryId, username);
                 return true;
             }
         }
 
         // 两者都不满足，无权限
-        log.warn("[checkGlossaryPermission] 无权限操作: userId={}, username={}, glossaryId={}, roleId={}, owner={}", 
+        log.warn("[checkGlossaryPermission] 无权限操作: userId={}, username={}, glossaryId={}, roleId={}, owner={}",
                 userId, username, glossaryId, glossary.getRoleId(), glossary.getUsername());
         return false;
     }
@@ -243,6 +251,80 @@ public class GlossaryHelper {
         }
     }
 
+    /**
+     * 获取当前用户可编辑的术语库列表
+     * <p>
+     * 只返回用户有权限修改的术语库：
+     * - 超级管理员：所有术语库
+     * - 普通用户：自己创建的术语库 + 所属角色的术语库（roleId匹配）
+     * <p>
+     * 注意：不包含仅可见但不可修改的术语库（roleShow匹配但不属于用户角色的）
+     *
+     * @param userId 用户ID
+     * @param username 用户名
+     * @param targetLanguage 目标语言
+     * @return 可编辑的术语库列表
+     */
+    public List<TranGlossaryDO> getEditableGlossaryList(Long userId, String username, String targetLanguage) {
+        if (userId == null || username == null) {
+            log.warn("[getEditableGlossaryList] 用户未登录");
+            return new ArrayList<>();
+        }
+
+        if (targetLanguage == null || targetLanguage.trim().isEmpty()) {
+            log.warn("[getEditableGlossaryList] 目标语言不能为空");
+            return new ArrayList<>();
+        }
+
+        try {
+            // 通过API获取用户的角色列表
+            CommonResult<Set<Long>> roleIdsResult = permissionApi.getLoginUserAllRoleIds(userId);
+            Set<Long> userRoleIds = roleIdsResult.getCheckedData();
+            if (userRoleIds == null) {
+                userRoleIds = new HashSet<>();
+            }
+
+            final Set<Long> finalRoleIds = userRoleIds;
+            final String finalTargetLanguage = targetLanguage;
+
+            boolean isSuperAdmin = finalRoleIds.contains(1L);
+
+            LambdaQueryWrapper<TranGlossaryDO> queryWrapper = new LambdaQueryWrapper<>();
+
+            queryWrapper.eq(TranGlossaryDO::getTargetLanguage, finalTargetLanguage);
+
+            if (!isSuperAdmin) {
+                // 条件1：术语库的所属角色在用户角色列表中（roleId匹配）
+                // 条件2：用户自己创建的术语库（username匹配）
+                if (CollUtil.isNotEmpty(finalRoleIds)) {
+                    queryWrapper.and(wrapper -> wrapper
+                        .in(TranGlossaryDO::getRoleId, finalRoleIds)
+                        .or()
+                        .eq(TranGlossaryDO::getUsername, username)
+                    );
+                } else {
+                    // 无角色用户只能查看自己创建的术语库
+                    queryWrapper.eq(TranGlossaryDO::getUsername, username);
+                }
+            }
+
+            queryWrapper.eq(TranGlossaryDO::getIsEnabled, 1)
+                       .orderByDesc(TranGlossaryDO::getCreateTime);
+
+            List<TranGlossaryDO> glossaryList = tranGlossaryMapper.selectList(queryWrapper);
+
+            log.info("[getEditableGlossaryList] 查询到 {} 个可编辑术语库, userId={}, username={}, targetLanguage={}, isSuperAdmin={}, roleIds={}",
+                    glossaryList.size(), userId, username, finalTargetLanguage, isSuperAdmin, finalRoleIds);
+
+            return glossaryList;
+
+        } catch (Exception e) {
+            log.error("[getEditableGlossaryList] 查询可编辑术语库失败, userId={}, username={}, targetLanguage={}",
+                    userId, username, targetLanguage, e);
+            return new ArrayList<>();
+        }
+    }
+
     public int saveTermsToGlossary(Long glossaryId, Map<String, String> terms) {
         if (terms == null || terms.isEmpty()) {
             return 0;
@@ -326,10 +408,12 @@ public class GlossaryHelper {
 
         Map<String, String> glossaryMap = new HashMap<>();
         for (TranGlossaryItemDO item : glossaryItems) {
-            glossaryMap.put(item.getSourceLanguage(), item.getTargetLanguage());
+            if (item.getSourceLanguage() != null && item.getTargetLanguage() != null) {
+                glossaryMap.put(item.getSourceLanguage(), item.getTargetLanguage());
+            }
         }
 
-        log.info("[buildGlossaryMap] 构建术语映射表，共 {} 条术语", glossaryMap.size());
+        log.info("[buildGlossaryMap] 构建术语映射表完成，共 {} 条有效术语", glossaryMap.size());
 
         return glossaryMap;
     }

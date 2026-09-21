@@ -126,6 +126,7 @@ import FeishuIcon from '@/assets/imgs/feishu.svg'
 
 import * as authUtil from '@/utils/auth'
 import { usePermissionStore } from '@/store/modules/permission'
+import { useUserStoreWithOut } from '@/store/modules/user'
 import * as LoginApi from '@/api/login'
 import { LoginStateEnum, useFormValid, useLoginState } from './useLogin'
 import router from '@/router'
@@ -209,17 +210,19 @@ const autoFeishuLogin = async () => {
       return
     }
 
-    // 向后端发送请求，完成飞书登录
-    const res = await LoginApi.feishuLogin({
-      code: code,
-      state: state
-    })
+    // 向后端发送请求，完成飞书登录（使用社交登录接口）
+    const res = await LoginApi.socialLogin('50', code, state)
 
     // 存储登录令牌，跳转到首页
     authUtil.setToken(res.token)
+
+    // 设置用户信息标记为未设置，让路由守卫来处理
+    const userStore = useUserStoreWithOut()
+    userStore.resetState()
+
     message.success('飞书登录成功')
     await push({ path: redirect.value || '/' })
-    
+
   } catch (e) {
     console.error('飞书登录失败', e)
     // index 登录失败直接回登录页
@@ -290,15 +293,19 @@ const handleLogin = async (params: any) => {
     // 向后端发送请求，执行账号密码登录
     const loginDataLoginForm = { ...loginData.loginForm, ...params }
     const res = await LoginApi.login(loginDataLoginForm)
-    
+
     // 加载页面并缓存登录信息
     loading.value = ElLoading.service({ text: '加载系统中...' })
     authUtil.setLoginForm(loginDataLoginForm)
     // 存储登录令牌
     authUtil.setToken(res)
-    
-    // 跳转到目标页面
-    await push({ path: redirect.value || permissionStore.addRouters[0].path })
+
+    // 设置用户信息标记为未设置，让路由守卫来处理
+    const userStore = useUserStoreWithOut()
+    userStore.resetState()
+
+    // 跳转到目标页面，由路由守卫处理用户信息和菜单加载
+    await push({ path: redirect.value || '/' })
   } finally {
     loginLoading.value = false
     loading.value?.close()
@@ -323,20 +330,20 @@ const checkFeishuBrowserLogin = async () => {
       const iframe = document.createElement('iframe')
       iframe.style.display = 'none'
       iframe.src = silentAuthUrl.replace(/\s/g, '')
-      
+
       // 超时处理（3秒）
       const timeoutId = setTimeout(() => {
         document.body.removeChild(iframe)
         resolve(false) // 未登录/需要扫码
       }, 3000)
-      
+
       // 监听iframe加载完成
       iframe.onload = () => {
         clearTimeout(timeoutId)
         document.body.removeChild(iframe)
         resolve(true) // 已登录，无需扫码
       }
-      
+
       document.body.appendChild(iframe)
     } catch (e) {
       resolve(false) // 检测失败，视为需要扫码
@@ -435,11 +442,16 @@ const checkFeishuSso = async () => {
     await loadFeishuSdk();
     window.h5sdk.ready(async () => {
       try {
-        const res = await new Promise((resolve, reject) => {
+        // 构建重定向URI，需要与飞书后台配置的完全一致
+        // 注意：飞书SDK的redirect_uri不需要包含查询参数，参数会在回调时自动带上
+        const redirectUri = location.origin + '/social-login'
+
+        const res: any = await new Promise((resolve, reject) => {
           window.tt.requestAccess({
             // appID: 'cli_a9562cb01f3b5bc9',
             // appID: 'cli_a9467258cdb85bde',
             appID: clientId,
+            redirect_uri: redirectUri,  // H5场景必须提供redirect_uri
             scopeList: [],
             success: resolve,
             fail: (err) => {
@@ -451,13 +463,13 @@ const checkFeishuSso = async () => {
         const loginRes = await LoginApi.feishuSsoLogin(res.code);
         authUtil.setToken(loginRes);
         message.success('免登成功');
-        
+
         // 使用 redirect.value 获取正确的重定向地址
         const targetPath = redirect.value || '/'
-        
+
         // 使用 nextTick 确保状态更新完成
         await new Promise(resolve => setTimeout(resolve, 50))
-        
+
         // 直接使用 window.location.replace 进行跳转，避免与路由守卫冲突
         // replace 方法不会在历史记录中留下当前页面，用户体验更好
         window.location.replace(targetPath)
@@ -491,7 +503,7 @@ onMounted(async () => {
   // 基础初始化
   getLoginFormCache()
   await getTenantByWebsite()
-  
+
   // 飞书回调则执行登录
   if (isFeishuCallback()) {
     autoFeishuLogin()
@@ -511,6 +523,14 @@ onMounted(async () => {
 </script>
 
 <style lang="scss" scoped>
+// 错误提示改为文档流定位，避免与下方“记住我”行重叠（该行为紧凑布局使用了负 margin）
+.login-form {
+  :deep(.el-form-item__error) {
+    position: static;
+    padding-top: 2px;
+  }
+}
+
 :deep(.anticon) {
   &:hover {
     color: var(--el-color-primary) !important;
