@@ -242,6 +242,15 @@ sva:
 
 transdoc:
   concurrency: ${TRANSDOC_CONCURRENCY:6}
+  adaptive-concurrency-enabled: ${TRANSDOC_ADAPTIVE_CONCURRENCY_ENABLED:false}
+  small-concurrency: ${TRANSDOC_SMALL_CONCURRENCY:12}
+  medium-concurrency: ${TRANSDOC_MEDIUM_CONCURRENCY:10}
+  large-concurrency: ${TRANSDOC_LARGE_CONCURRENCY:8}
+  small-segment-threshold: ${TRANSDOC_SMALL_SEGMENT_THRESHOLD:30}
+  small-character-threshold: ${TRANSDOC_SMALL_CHARACTER_THRESHOLD:8000}
+  medium-segment-threshold: ${TRANSDOC_MEDIUM_SEGMENT_THRESHOLD:150}
+  medium-character-threshold: ${TRANSDOC_MEDIUM_CHARACTER_THRESHOLD:50000}
+  global-concurrency: ${TRANSDOC_GLOBAL_CONCURRENCY:24}
   translation-max-attempts: ${TRANSDOC_TRANSLATION_MAX_ATTEMPTS:2}
   pdf-convert-mode: ${TRANSDOC_PDF_CONVERT_MODE:1}
   python-recognize-url: ${TRANSDOC_PYTHON_RECOGNIZE_URL:http://127.0.0.1:8030/internal/v1/ocr/recognize}

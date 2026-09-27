@@ -108,9 +108,12 @@ class LiveTranslationEvaluationTest {
         String model = environmentOrDefault("QWEN_MODEL", "qwen3.8-flash");
         String targetLanguage = System.getProperty("translation.eval.target", "English");
         int concurrency = Integer.parseInt(System.getProperty("translation.eval.concurrency", "1"));
+        boolean adaptiveConcurrency = Boolean.parseBoolean(
+                System.getProperty("translation.eval.adaptive", "false"));
 
         TransDocProperties properties = new TransDocProperties();
         properties.setConcurrency(concurrency);
+        properties.setAdaptiveConcurrencyEnabled(adaptiveConcurrency);
         properties.setTempDir(environmentOrDefault("TRANSDOC_TEMP_DIR", "D:/Temp/trans-platform"));
         properties.setPythonRecognizeUrl(environmentOrDefault(
                 "TRANSDOC_PYTHON_RECOGNIZE_URL",
@@ -176,8 +179,8 @@ class LiveTranslationEvaluationTest {
                 () -> "translation reported an error: " + result.getError());
 
         System.out.printf(
-                "LIVE_TRANSLATION_EVAL input=%s output=%s model=%s concurrency=%d ocr_ms=%d translation_ms=%d total_ms=%d%n",
-                input.getFileName(), output, model, concurrency, ocrMillis, translationMillis,
+                "LIVE_TRANSLATION_EVAL input=%s output=%s model=%s configured_concurrency=%d adaptive=%s ocr_ms=%d translation_ms=%d total_ms=%d%n",
+                input.getFileName(), output, model, concurrency, adaptiveConcurrency, ocrMillis, translationMillis,
                 ocrMillis + translationMillis);
         return new RunMetrics(ocrMillis, translationMillis);
     }

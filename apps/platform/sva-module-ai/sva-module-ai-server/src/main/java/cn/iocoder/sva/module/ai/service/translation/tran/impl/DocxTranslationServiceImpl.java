@@ -4,6 +4,7 @@ import cn.iocoder.sva.module.ai.service.translation.tran.*;
 import cn.iocoder.sva.module.ai.service.translation.tran.common.DocQualityChecker;
 import cn.iocoder.sva.module.ai.service.translation.tran.common.DocxUtils;
 import cn.iocoder.sva.module.ai.service.translation.tran.config.TransDocProperties;
+import cn.iocoder.sva.module.ai.service.translation.tran.config.TranslationConcurrencyPolicy;
 import cn.iocoder.sva.module.ai.service.translation.tran.model.TranslationPair;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.EncryptedDocumentException;
@@ -96,9 +97,9 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
         String jobId = UUID.randomUUID().toString().substring(0, 8);
         long startTime = System.currentTimeMillis();
 
-        int concurrency = Math.max(1, properties.getConcurrency());
-        log.info("[{}] START file='{}' -> '{}', target='{}', strict={}, concurrency={}, enableComparison={}",
-                jobId, inputPath, outputPath, targetLanguage, strictFormat, concurrency, enableComparison);
+        log.info("[{}] START file='{}' -> '{}', target='{}', strict={}, adaptiveConcurrency={}, enableComparison={}",
+                jobId, inputPath, outputPath, targetLanguage, strictFormat,
+                properties.isAdaptiveConcurrencyEnabled(), enableComparison);
 
         List<TranslationPair> pairs = new CopyOnWriteArrayList<>();
         Map<String, CompletableFuture<TranslateResult>> dedupCache = new ConcurrentHashMap<>();
@@ -128,6 +129,15 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
             }
 
             int total = transIndices.size();
+            long totalCharacters = transIndices.stream()
+                    .map(paragraphs::get)
+                    .map(XWPFParagraph::getText)
+                    .filter(Objects::nonNull)
+                    .mapToLong(String::length)
+                    .sum();
+            int concurrency = TranslationConcurrencyPolicy.resolve(properties, total, totalCharacters);
+            log.info("[{}] CONCURRENCY segments={} characters={} workers={} globalLimit={}",
+                    jobId, total, totalCharacters, concurrency, properties.getGlobalConcurrency());
             AtomicInteger done = new AtomicInteger(0);
 
             // 使用传入的术语库

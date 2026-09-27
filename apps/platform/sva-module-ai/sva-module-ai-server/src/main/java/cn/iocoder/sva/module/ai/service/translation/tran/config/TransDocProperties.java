@@ -26,6 +26,29 @@ public class TransDocProperties {
      */
     private int concurrency = 6;
 
+    /** Dynamically select per-document concurrency from document size. */
+    private boolean adaptiveConcurrencyEnabled = false;
+
+    /** Worker count for small documents. */
+    private int smallConcurrency = 12;
+
+    /** Worker count for medium documents. */
+    private int mediumConcurrency = 10;
+
+    /** Worker count for large documents. */
+    private int largeConcurrency = 8;
+
+    /** A document is small only when both small thresholds are satisfied. */
+    private int smallSegmentThreshold = 30;
+    private long smallCharacterThreshold = 8_000;
+
+    /** Crossing either medium threshold classifies the document as large. */
+    private int mediumSegmentThreshold = 150;
+    private long mediumCharacterThreshold = 50_000;
+
+    /** Maximum simultaneous remote model calls across all documents in this process. */
+    private int globalConcurrency = 24;
+
     /**
      * Maximum document-engine attempts for a segment when the model returns an error status.
      * The model client may also perform transport-level retries; this outer retry protects the

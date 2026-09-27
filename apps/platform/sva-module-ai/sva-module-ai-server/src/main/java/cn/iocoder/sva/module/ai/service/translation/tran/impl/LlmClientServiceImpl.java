@@ -8,6 +8,7 @@ import cn.iocoder.sva.module.ai.service.model.AiChatRoleService;
 import cn.iocoder.sva.module.ai.service.model.AiModelService;
 import cn.iocoder.sva.module.ai.service.translation.tran.LlmClientService;
 import cn.iocoder.sva.module.ai.service.translation.tran.config.TransDocProperties;
+import cn.iocoder.sva.module.ai.service.translation.tran.config.TranslationConcurrencyLimiter;
 import cn.iocoder.sva.module.ai.service.translation.tran.context.AiModelContext;
 import cn.iocoder.sva.module.ai.service.translation.tran.context.ChatModelContext;
 import cn.iocoder.sva.module.ai.service.translation.tran.context.PromptContext;
@@ -56,6 +57,9 @@ public class LlmClientServiceImpl implements LlmClientService {
 
     /** 缓存过期时间：1天 */
     private static final long CACHE_EXPIRE_DAYS = 1;
+
+    /** Shared by every translation request handled by this singleton service. */
+    private volatile TranslationConcurrencyLimiter translationConcurrencyLimiter;
 
 
     /** 中文字符正则 */
@@ -348,7 +352,7 @@ public class LlmClientServiceImpl implements LlmClientService {
                     temperature,
                     text != null ? text.length() : 0);
 
-            ChatResponse response = currentModel.call(prompt);
+            ChatResponse response = getTranslationConcurrencyLimiter().execute(() -> currentModel.call(prompt));
 
             // 计算请求耗时
             long elapsedTime = System.currentTimeMillis() - startTime;
@@ -379,6 +383,24 @@ public class LlmClientServiceImpl implements LlmClientService {
             // 重要：返回空字符串而不是原文，避免将未翻译的原文存入缓存
             return new TranslateResult("", new UsageStats(), "[ERROR] " + e.getMessage());
         }
+    }
+
+    private TranslationConcurrencyLimiter getTranslationConcurrencyLimiter() {
+        TranslationConcurrencyLimiter current = translationConcurrencyLimiter;
+        if (current == null) {
+            synchronized (this) {
+                current = translationConcurrencyLimiter;
+                if (current == null) {
+                    int maximum = transDocProperties != null
+                            ? Math.max(1, transDocProperties.getGlobalConcurrency())
+                            : 24;
+                    current = new TranslationConcurrencyLimiter(maximum);
+                    translationConcurrencyLimiter = current;
+                    log.info("[LLM全局限流] maximumConcurrentCalls={}", maximum);
+                }
+            }
+        }
+        return current;
     }
 
     /**

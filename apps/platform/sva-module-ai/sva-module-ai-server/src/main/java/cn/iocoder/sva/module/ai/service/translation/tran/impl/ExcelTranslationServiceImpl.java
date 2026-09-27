@@ -3,6 +3,7 @@ package cn.iocoder.sva.module.ai.service.translation.tran.impl;
 import cn.iocoder.sva.module.ai.service.translation.tran.*;
 import cn.iocoder.sva.module.ai.service.translation.tran.common.DocQualityChecker;
 import cn.iocoder.sva.module.ai.service.translation.tran.config.TransDocProperties;
+import cn.iocoder.sva.module.ai.service.translation.tran.config.TranslationConcurrencyPolicy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.EncryptedDocumentException;
 import org.apache.poi.openxml4j.exceptions.NotOfficeXmlFileException;
@@ -81,9 +82,8 @@ public class ExcelTranslationServiceImpl implements ExcelTranslationService {
         String jobId = UUID.randomUUID().toString().substring(0, 8);
         long startTime = System.currentTimeMillis();
 
-        int concurrency = Math.max(1, properties.getConcurrency());
-        log.info("[{}] EXCEL START file='{}' -> '{}', target='{}', concurrency={}",
-                jobId, inputPath, outputPath, targetLanguage, concurrency);
+        log.info("[{}] EXCEL START file='{}' -> '{}', target='{}', adaptiveConcurrency={}",
+                jobId, inputPath, outputPath, targetLanguage, properties.isAdaptiveConcurrencyEnabled());
 
         List<ExcelPair> pairs = new CopyOnWriteArrayList<>();
         AtomicInteger errorCount = new AtomicInteger(0);
@@ -148,9 +148,13 @@ public class ExcelTranslationServiceImpl implements ExcelTranslationService {
             uniqueTextsSet.addAll(sheetTitleMap.keySet());
             List<String> uniqueTexts = new ArrayList<>(uniqueTextsSet);
             int totalUnique = uniqueTexts.size();
+            long totalCharacters = uniqueTexts.stream().mapToLong(String::length).sum();
+            int concurrency = TranslationConcurrencyPolicy.resolve(
+                    properties, totalUnique, totalCharacters);
 
-            log.info("[{}] EXCEL collect: unique_strings={}, cell_texts={}, sheets={}",
-                    jobId, totalUnique, textMap.size(), sheetTitleMap.size());
+            log.info("[{}] EXCEL collect: unique_strings={}, characters={}, cell_texts={}, sheets={}, workers={}, globalLimit={}",
+                    jobId, totalUnique, totalCharacters, textMap.size(), sheetTitleMap.size(),
+                    concurrency, properties.getGlobalConcurrency());
 
             // 3. 使用传入的术语库
             Map<String, String> glossary;
