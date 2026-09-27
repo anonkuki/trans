@@ -108,4 +108,4 @@ The release gate applies to the supplied samples and produces an editable transl
 
 - [x] **Step 1: Run all focused and relevant Java tests, all document-engine/evaluation pytest tests, repository boundary tests, `git diff --check`, and staged secret scan.**
 - [x] **Step 2: Self-review the complete diff for security, fallback behavior, sample hard-coding, concurrency regressions, and unbounded token growth.**
-- [ ] **Step 3: Commit to `integration/system1-pdf-ocr`, push to `origin`, fetch, and require local HEAD to equal remote HEAD. Do not merge `main` or touch test/production servers.**
+- [x] **Step 3: Commit to `integration/system1-pdf-ocr`, push to `origin`, fetch, and require local HEAD to equal remote HEAD. Do not merge `main` or touch test/production servers.**
