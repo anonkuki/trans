@@ -62,6 +62,8 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
     private static final Pattern ALPHA_PATTERN = Pattern.compile("[A-Za-z]");
     /** 仅符号正则 */
     private static final Pattern ONLY_SYMBOLS = Pattern.compile("^[\\s\\W_]+$", Pattern.UNICODE_CHARACTER_CLASS);
+    /** Numeric tokens used to make quality-correction prompts explicit. */
+    private static final Pattern NUMBER_TOKEN_PATTERN = Pattern.compile("[0-9]+(?:[.,/:][0-9]+)*");
 
     public DocxTranslationServiceImpl(TransDocProperties properties,
                                        LlmClientService llmClient,
@@ -99,7 +101,7 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
                 jobId, inputPath, outputPath, targetLanguage, strictFormat, concurrency, enableComparison);
 
         List<TranslationPair> pairs = new CopyOnWriteArrayList<>();
-        Map<String, TranslateResult> dedupCache = new ConcurrentHashMap<>();
+        Map<String, CompletableFuture<TranslateResult>> dedupCache = new ConcurrentHashMap<>();
         AtomicInteger errorCount = new AtomicInteger(0);
         String contrastOutputPath = null;
 
@@ -156,6 +158,9 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
                 try {
                     ParagraphResult res = future.get();
                     results.add(res);
+                    if (isErrorStatus(res.status)) {
+                        errorCount.incrementAndGet();
+                    }
 
                     int current = done.incrementAndGet();
                     safeCallback(progressCallback, current, total,
@@ -306,7 +311,8 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
 
         return new TranslationResult(
                 pairs.size(), qcReport, qcTxtPath,
-                pairs, outputPath, contrastOutputPath, errorCount.get(), null
+                pairs, outputPath, contrastOutputPath, errorCount.get(),
+                errorCount.get() > 0 ? "部分段落翻译失败：" + errorCount.get() : null
         );
     }
 
@@ -328,7 +334,7 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
             Map<String, String> glossary,
             boolean useGlossaryReplace,
             boolean strictFormat,
-            Map<String, TranslateResult> dedupCache,
+            Map<String, CompletableFuture<TranslateResult>> dedupCache,
             String jobId) {
 
         try {
@@ -359,16 +365,9 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
             }
 
             // 普通翻译
-            TranslateResult result = translateText(src, targetLanguage, glossary, useGlossaryReplace);
-
-            // 只有非完全命中的结果才加入去重缓存
-            // 完全命中的结果每次都应该重新从术语库获取，以支持术语实时更新
-            if (!"完全命中".equals(result.getStatus())) {
-                String cacheKey = "P:" + targetLanguage + ":" + src;
-                dedupCache.put(cacheKey, result);
-            } else {
-                log.debug("[段落处理][idx={}] 完全命中术语，不加入去重缓存，支持术语实时更新", idx);
-            }
+            TranslateResult result = translateDeduplicated(
+                    "P:" + targetLanguage + ":" + src,
+                    src, targetLanguage, glossary, useGlossaryReplace, dedupCache);
 
             return new ParagraphResult(idx, "paragraph", src, result.getContent(), result.getStatus());
 
@@ -389,7 +388,7 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
             String targetLanguage,
             Map<String, String> glossary,
             boolean useGlossaryReplace,
-            Map<String, TranslateResult> dedupCache) {
+            Map<String, CompletableFuture<TranslateResult>> dedupCache) {
 
         List<GroupResult> groupResults = new ArrayList<>();
         List<String> statusList = new ArrayList<>();
@@ -413,13 +412,9 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
                 if (part.isBlank()) continue;
 
                 // 翻译每个片段
-                TranslateResult tr = translateText(part, targetLanguage, glossary, useGlossaryReplace);
-
-                // 只有非完全命中的结果才加入去重缓存
-                if (!"完全命中".equals(tr.getStatus())) {
-                    String cacheKey = "S:" + targetLanguage + ":" + part;
-                    dedupCache.put(cacheKey, tr);
-                }
+                TranslateResult tr = translateDeduplicated(
+                        "S:" + targetLanguage + ":" + part,
+                        part, targetLanguage, glossary, useGlossaryReplace, dedupCache);
 
                 translatedParts.add(tr.getContent());
                 partStatuses.add(tr.getStatus());
@@ -454,10 +449,55 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
             String targetLanguage,
             Map<String, String> glossary,
             boolean useGlossaryReplace,
-            Map<String, TranslateResult> dedupCache) {
+            Map<String, CompletableFuture<TranslateResult>> dedupCache) {
 
         // 【已废弃】此方法不再使用，因为 POI 访问已移到全局锁内
         throw new UnsupportedOperationException("请使用 processStrictFormatWithGroups 方法");
+    }
+
+    /**
+     * Shares an in-flight translation between repeated paragraphs in the same document.
+     * This avoids duplicate model requests even when equal text is processed concurrently.
+     */
+    private TranslateResult translateDeduplicated(
+            String cacheKey,
+            String text,
+            String targetLanguage,
+            Map<String, String> glossary,
+            boolean useGlossaryReplace,
+            Map<String, CompletableFuture<TranslateResult>> dedupCache) {
+        CompletableFuture<TranslateResult> created = new CompletableFuture<>();
+        CompletableFuture<TranslateResult> existing = dedupCache.putIfAbsent(cacheKey, created);
+        CompletableFuture<TranslateResult> future = existing != null ? existing : created;
+        if (existing == null) {
+            try {
+                TranslateResult result = null;
+                int maxAttempts = Math.max(1, properties.getTranslationMaxAttempts());
+                for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                    result = translateText(text, targetLanguage, glossary, useGlossaryReplace);
+                    if (!isErrorStatus(result.getStatus())) {
+                        break;
+                    }
+                    if (attempt < maxAttempts) {
+                        log.warn("[segment_retry] model error status={}, retry={}/{}",
+                                result.getStatus(), attempt + 1, maxAttempts);
+                    }
+                }
+                created.complete(result);
+            } catch (Throwable throwable) {
+                created.completeExceptionally(throwable);
+                dedupCache.remove(cacheKey, created);
+            }
+        }
+        try {
+            return future.join();
+        } catch (CompletionException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw exception;
+        }
     }
 
     /**
@@ -528,8 +568,30 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
         LlmClientService.TranslateResult sanitized = llmClient.sanitizeOrRetry(
                 replaced, targetLanguage, llmResult.getContent(), llmResult.getUsage());
 
+        if (isErrorStatus(sanitized.getStatus())) {
+            return new TranslateResult(text, sanitized.getStatus());
+        }
+
         // 质量检查
         DocQualityChecker.QcResult qcResult = DocQualityChecker.check(replaced, sanitized.getContent());
+        if (!qcResult.isOk()) {
+            List<String> requiredNumbers = NUMBER_TOKEN_PATTERN.matcher(replaced)
+                    .results().map(match -> match.group()).distinct().toList();
+            String correctionInput = "Translate only the SOURCE text below into " + targetLanguage + ". "
+                    + "Keep every number, decimal, unit, document identifier, and section number exactly as written; "
+                    + "never spell digits as words. The output must literally contain these numeric tokens: "
+                    + requiredNumbers + ". In particular, translate quantities such as 2份 as '2 copies', not "
+                    + "'two copies'. Return only the corrected translation.\nSOURCE:\n" + replaced;
+            LlmClientService.TranslateResult correction = llmClient.cachedCall(
+                    LlmClientService.CallKind.STRICT, correctionInput, targetLanguage);
+            LlmClientService.TranslateResult corrected = llmClient.sanitizeOrRetry(
+                    replaced, targetLanguage, correction.getContent(), correction.getUsage());
+            DocQualityChecker.QcResult correctedQc = DocQualityChecker.check(replaced, corrected.getContent());
+            if (correctedQc.isOk()) {
+                sanitized = corrected;
+                qcResult = correctedQc;
+            }
+        }
         // 根据covered判断状态：0=未命中，>0=部分命中
         String status;
         if (qcResult.isOk()) {
@@ -606,6 +668,10 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
         // 清洗或重试
         LlmClientService.TranslateResult sanitized = llmClient.sanitizeOrRetry(
                 text, targetLanguage, constraintResult.getContent(), constraintResult.getUsage());
+
+        if (isErrorStatus(sanitized.getStatus())) {
+            return new TranslateResult(text, sanitized.getStatus());
+        }
 
         // 质量检查
         DocQualityChecker.QcResult qcResult = DocQualityChecker.check(text, sanitized.getContent());
@@ -838,6 +904,11 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
 
         if (filtered.isEmpty()) return "无需翻译";
 
+        Optional<String> errorStatus = filtered.stream()
+                .filter(DocxTranslationServiceImpl::isErrorStatus)
+                .findFirst();
+        if (errorStatus.isPresent()) return errorStatus.get();
+
         boolean hasFull = filtered.contains("完全命中");
         boolean hasPartial = filtered.contains("部分命中");
         boolean hasMiss = filtered.stream().anyMatch(s -> s.equals("未命中") || s.startsWith("[ERROR]"));
@@ -845,6 +916,10 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
         if (hasPartial || (hasFull && hasMiss)) return "部分命中";
         if (hasFull && !hasMiss) return "完全命中";
         return "未命中";
+    }
+
+    private static boolean isErrorStatus(String status) {
+        return status != null && status.startsWith("[ERROR]");
     }
 
     /**

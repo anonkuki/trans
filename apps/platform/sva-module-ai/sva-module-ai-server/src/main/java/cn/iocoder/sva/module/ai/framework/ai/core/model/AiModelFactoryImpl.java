@@ -346,6 +346,29 @@ public class AiModelFactoryImpl implements AiModelFactory {
      */
     private static ChatModel buildTongYiChatModel(String key, String url, String model, Double temperature) {
         String modelName = StrUtil.isNotBlank(model) ? model : DashScopeApi.DEFAULT_CHAT_MODEL;
+        double temp = temperature != null ? temperature : 0.7;
+
+        // Workspace-scoped Qwen keys use the OpenAI-compatible endpoint. Spring AI appends
+        // /v1/chat/completions itself, so normalize URLs copied from curl/Python configuration.
+        if (StrUtil.isNotBlank(url) && url.contains("compatible-mode")) {
+            String compatibleBaseUrl = url.replaceAll("/+$", "");
+            if (compatibleBaseUrl.endsWith("/v1")) {
+                compatibleBaseUrl = compatibleBaseUrl.substring(0, compatibleBaseUrl.length() - 3);
+            }
+            log.info("Using OpenAI-compatible Qwen endpoint: model={}, baseUrl={}",
+                    modelName, compatibleBaseUrl);
+            return OpenAiChatModel.builder()
+                    .openAiApi(OpenAiApi.builder()
+                            .baseUrl(compatibleBaseUrl)
+                            .apiKey(key)
+                            .build())
+                    .defaultOptions(OpenAiChatOptions.builder()
+                            .model(modelName)
+                            .temperature(temp)
+                            .build())
+                    .toolCallingManager(getToolCallingManager())
+                    .build();
+        }
         
         // 判断是否是 Qwen3 系列模型或需要多模态支持的模型（Spring AI Alibaba 暂未完全支持）
         if (isMultiModalModel(modelName)) {
@@ -359,7 +382,6 @@ public class AiModelFactoryImpl implements AiModelFactory {
 
         DashScopeApi dashScopeApi = builder.build();
         // 使用数据库中的温度参数，如果为空则使用默认值 0.7
-        double temp = temperature != null ? temperature : 0.7;
         DashScopeChatOptions options = DashScopeChatOptions.builder()
                 .model(modelName)
                 .temperature(temp)

@@ -11,6 +11,15 @@ $root = (Resolve-Path -LiteralPath $RepositoryRoot).Path
 $violations = [System.Collections.Generic.List[string]]::new()
 $excludedDirectoryPattern = '\\(?:\.git|node_modules|target|dist|dist-prod|dist-test|logs|\.idea|\.vscode)(?:\\|$)'
 
+$gitMarker = Join-Path $root '.git'
+if (Test-Path -LiteralPath $gitMarker) {
+    $rootIgnore = Join-Path $root '.gitignore'
+    $ignoreLines = if (Test-Path -LiteralPath $rootIgnore) { Get-Content -LiteralPath $rootIgnore } else { @() }
+    if (-not ($ignoreLines | Where-Object { $_.Trim() -eq '/测试文件夹/' })) {
+        $violations.Add('missing-sensitive-test-folder-ignore:.gitignore')
+    }
+}
+
 function Get-RelativePath([string]$path) {
     return $path.Substring($root.Length).TrimStart('\').Replace('\', '/')
 }

@@ -1,4 +1,7 @@
 .worktrees/
+/测试文件夹/
+/tools/translation-eval/.env.local
+/tools/translation-eval/tmp/
 
 # IDE / OS
 .idea/

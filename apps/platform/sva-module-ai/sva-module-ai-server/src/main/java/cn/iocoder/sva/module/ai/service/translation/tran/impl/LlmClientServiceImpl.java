@@ -475,6 +475,17 @@ public class LlmClientServiceImpl implements LlmClientService {
             return CJK_PATTERN.matcher(content).find();
         }
         if (targetLanguage.toLowerCase().startsWith("chinese")) {
+            // URLs and email addresses are intentionally language-neutral and must be
+            // preserved verbatim. Exclude them from the English-ratio heuristic so a
+            // correct Chinese translation containing contact details is not retried.
+            String validationContent = content
+                    .replaceAll("(?i)\\b(?:https?://|www\\.)\\S+", " ")
+                    .replaceAll("(?i)\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b", " ")
+                    .trim();
+            if (validationContent.isEmpty()) {
+                return false;
+            }
+
             // 目标是中文，允许少量英文单位/缩写
             // 优化策略：
             // 1. 如果内容很短（3个及以内单词），即使全是英文也认为是正常的（可能是短语无需翻译）
@@ -484,7 +495,7 @@ public class LlmClientServiceImpl implements LlmClientService {
 
             // 先检查是否是短句（3个及以内单词）
             // 按空格分割，过滤空字符串，统计单词数
-            String[] words = content.trim().split("\\s+");
+            String[] words = validationContent.split("\\s+");
             int wordCount = 0;
             boolean hasLongEnglishWord = false;
             for (String word : words) {
@@ -510,7 +521,7 @@ public class LlmClientServiceImpl implements LlmClientService {
             // 排除全大写缩写（如 WorldBioHazTec）和首字母大写专有名词（如 Moderna, Novartis）
             // 只匹配全小写的超长单词（这才是真正的未翻译英文句子）
             Pattern longEnglishWord = Pattern.compile("[a-z]{30,}");
-            java.util.regex.Matcher longMatcher = longEnglishWord.matcher(content);
+            java.util.regex.Matcher longMatcher = longEnglishWord.matcher(validationContent);
             while (longMatcher.find()) {
                 String matchedText = longMatcher.group();
                 int startIndex = longMatcher.start();
@@ -520,7 +531,7 @@ public class LlmClientServiceImpl implements LlmClientService {
                 // 向前查找最近的引号
                 int lastQuoteBefore = -1;
                 for (int i = startIndex - 1; i >= 0; i--) {
-                    char c = content.charAt(i);
+                    char c = validationContent.charAt(i);
                     if (c == '"' || c == '"' || c == '\'') {
                         lastQuoteBefore = i;
                         break;
@@ -528,8 +539,8 @@ public class LlmClientServiceImpl implements LlmClientService {
                 }
                 // 向后查找最近的引号
                 int nextQuoteAfter = -1;
-                for (int i = startIndex + matchedText.length(); i < content.length(); i++) {
-                    char c = content.charAt(i);
+                for (int i = startIndex + matchedText.length(); i < validationContent.length(); i++) {
+                    char c = validationContent.charAt(i);
                     if (c == '"' || c == '"' || c == '\'') {
                         nextQuoteAfter = i;
                         break;
@@ -551,7 +562,7 @@ public class LlmClientServiceImpl implements LlmClientService {
 
             // 提取所有连续英文片段（长度>=2），排除缩写、专有名词和引号内的内容
             Pattern englishFragments = Pattern.compile("[A-Za-z]{2,}");
-            java.util.regex.Matcher matcher = englishFragments.matcher(content);
+            java.util.regex.Matcher matcher = englishFragments.matcher(validationContent);
             int totalEnglishLength = 0;
             while (matcher.find()) {
                 String fragment = matcher.group();
@@ -573,7 +584,7 @@ public class LlmClientServiceImpl implements LlmClientService {
                 // 向前查找最近的引号
                 int lastQuoteBefore = -1;
                 for (int i = startIndex - 1; i >= 0; i--) {
-                    char c = content.charAt(i);
+                    char c = validationContent.charAt(i);
                     if (c == '"' || c == '"' || c == '\'') {
                         lastQuoteBefore = i;
                         break;
@@ -581,8 +592,8 @@ public class LlmClientServiceImpl implements LlmClientService {
                 }
                 // 向后查找最近的引号
                 int nextQuoteAfter = -1;
-                for (int i = startIndex + fragment.length(); i < content.length(); i++) {
-                    char c = content.charAt(i);
+                for (int i = startIndex + fragment.length(); i < validationContent.length(); i++) {
+                    char c = validationContent.charAt(i);
                     if (c == '"' || c == '"' || c == '\'') {
                         nextQuoteAfter = i;
                         break;
@@ -599,7 +610,7 @@ public class LlmClientServiceImpl implements LlmClientService {
             }
 
             // 计算英文占比
-            double englishRatio = content.isEmpty() ? 0 : (double) totalEnglishLength / content.length();
+            double englishRatio = (double) totalEnglishLength / validationContent.length();
 
             // 如果英文占比超过 60%，认为翻译失败
             // 阈值提高是因为中文译文天然较短，公司名/缩写等专有名词占比容易偏高

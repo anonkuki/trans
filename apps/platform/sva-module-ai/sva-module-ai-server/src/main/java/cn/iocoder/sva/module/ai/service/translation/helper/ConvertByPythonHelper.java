@@ -5,6 +5,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
+import org.apache.poi.xwpf.usermodel.XWPFTable;
+import org.apache.poi.xwpf.usermodel.XWPFTableCell;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Element;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.STMerge;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpEntity;
@@ -103,6 +108,10 @@ public class ConvertByPythonHelper {
                     if (text.isEmpty()) {
                         continue;
                     }
+                    if (isHtmlTable(block, text)) {
+                        appendHtmlTable(wordDocument, text);
+                        continue;
+                    }
                     XWPFParagraph paragraph = wordDocument.createParagraph();
                     String role = block.path("layout_role").asText("");
                     if ("title".equals(role)) {
@@ -125,5 +134,92 @@ public class ConvertByPythonHelper {
     private static int readingOrder(JsonNode block) {
         JsonNode readingOrder = block.path("reading_order");
         return readingOrder.isIntegralNumber() ? readingOrder.asInt() : block.path("order").asInt();
+    }
+
+    private static boolean isHtmlTable(JsonNode block, String text) {
+        return ("table".equalsIgnoreCase(block.path("type").asText())
+                || "table".equalsIgnoreCase(block.path("content").path("kind").asText()))
+                && text.toLowerCase().contains("<table");
+    }
+
+    private static void appendHtmlTable(XWPFDocument document, String html) {
+        Element sourceTable = Jsoup.parseBodyFragment(html).selectFirst("table");
+        if (sourceTable == null) {
+            document.createParagraph().createRun().setText(html);
+            return;
+        }
+        List<Element> sourceRows = sourceTable.select("tr");
+        int columnCount = sourceRows.stream()
+                .mapToInt(row -> directCells(row).stream()
+                        .mapToInt(cell -> positiveSpan(cell.attr("colspan")))
+                        .sum())
+                .max()
+                .orElse(1);
+        if (sourceRows.isEmpty() || columnCount <= 0) {
+            return;
+        }
+
+        XWPFTable table = document.createTable(sourceRows.size(), columnCount);
+        boolean[][] occupied = new boolean[sourceRows.size()][columnCount];
+        for (int rowIndex = 0; rowIndex < sourceRows.size(); rowIndex++) {
+            int columnIndex = 0;
+            for (Element sourceCell : directCells(sourceRows.get(rowIndex))) {
+                while (columnIndex < columnCount && occupied[rowIndex][columnIndex]) {
+                    columnIndex++;
+                }
+                if (columnIndex >= columnCount) {
+                    break;
+                }
+                int rowSpan = Math.min(positiveSpan(sourceCell.attr("rowspan")), sourceRows.size() - rowIndex);
+                int columnSpan = Math.min(positiveSpan(sourceCell.attr("colspan")), columnCount - columnIndex);
+                XWPFTableCell target = table.getRow(rowIndex).getCell(columnIndex);
+                target.setText(sourceCell.text().replace("\\n", "\n").strip());
+
+                if (columnSpan > 1) {
+                    mergeHorizontally(table, rowIndex, columnIndex, columnIndex + columnSpan - 1);
+                }
+                if (rowSpan > 1) {
+                    mergeVertically(table, columnIndex, rowIndex, rowIndex + rowSpan - 1, columnSpan);
+                }
+                for (int r = rowIndex; r < rowIndex + rowSpan; r++) {
+                    for (int c = columnIndex; c < columnIndex + columnSpan; c++) {
+                        occupied[r][c] = true;
+                    }
+                }
+                columnIndex += columnSpan;
+            }
+        }
+    }
+
+    private static int positiveSpan(String value) {
+        try {
+            return Math.max(1, Integer.parseInt(value));
+        } catch (NumberFormatException ignored) {
+            return 1;
+        }
+    }
+
+    private static List<Element> directCells(Element row) {
+        return row.children().stream()
+                .filter(child -> "td".equals(child.normalName()) || "th".equals(child.normalName()))
+                .toList();
+    }
+
+    private static void mergeHorizontally(XWPFTable table, int row, int fromColumn, int toColumn) {
+        for (int column = fromColumn; column <= toColumn; column++) {
+            XWPFTableCell cell = table.getRow(row).getCell(column);
+            cell.getCTTc().addNewTcPr().addNewHMerge()
+                    .setVal(column == fromColumn ? STMerge.RESTART : STMerge.CONTINUE);
+        }
+    }
+
+    private static void mergeVertically(XWPFTable table, int column, int fromRow, int toRow, int columnSpan) {
+        for (int row = fromRow; row <= toRow; row++) {
+            for (int offset = 0; offset < columnSpan; offset++) {
+                XWPFTableCell cell = table.getRow(row).getCell(column + offset);
+                cell.getCTTc().addNewTcPr().addNewVMerge()
+                        .setVal(row == fromRow ? STMerge.RESTART : STMerge.CONTINUE);
+            }
+        }
     }
 }

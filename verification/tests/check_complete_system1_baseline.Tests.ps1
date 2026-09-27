@@ -13,6 +13,15 @@ try {
         throw "Expected a clean fixture to pass, exit code was $LASTEXITCODE"
     }
 
+    New-Item -ItemType Directory -Force -Path (Join-Path $fixtureRoot '.git') | Out-Null
+    Set-Content -LiteralPath (Join-Path $fixtureRoot '.gitignore') -Value '.env'
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $checker -RepositoryRoot $fixtureRoot
+    if ($LASTEXITCODE -eq 0) {
+        throw 'Expected a repository without the sensitive test-folder ignore rule to fail'
+    }
+    Remove-Item -LiteralPath (Join-Path $fixtureRoot '.git') -Recurse -Force
+    Remove-Item -LiteralPath (Join-Path $fixtureRoot '.gitignore') -Force
+
     Set-Content -LiteralPath (Join-Path $fixtureRoot 'application.yaml') -Value 'password:'
     & powershell -NoProfile -ExecutionPolicy Bypass -File $checker -RepositoryRoot $fixtureRoot
     if ($LASTEXITCODE -ne 0) {

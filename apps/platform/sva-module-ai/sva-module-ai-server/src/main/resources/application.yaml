@@ -241,6 +241,8 @@ sva:
     enable: false
 
 transdoc:
+  concurrency: ${TRANSDOC_CONCURRENCY:6}
+  translation-max-attempts: ${TRANSDOC_TRANSLATION_MAX_ATTEMPTS:2}
   pdf-convert-mode: ${TRANSDOC_PDF_CONVERT_MODE:1}
   python-recognize-url: ${TRANSDOC_PYTHON_RECOGNIZE_URL:http://127.0.0.1:8030/internal/v1/ocr/recognize}
   python-internal-token: ${TRANSDOC_PYTHON_INTERNAL_TOKEN:}

@@ -27,6 +27,13 @@ public class TransDocProperties {
     private int concurrency = 6;
 
     /**
+     * Maximum document-engine attempts for a segment when the model returns an error status.
+     * The model client may also perform transport-level retries; this outer retry protects the
+     * document from being emitted with untranslated gaps after a transient upstream timeout.
+     */
+    private int translationMaxAttempts = 2;
+
+    /**
      * PDF转Word的模式：0或空表示使用PDFBox（默认），1表示使用Python服务
      */
     private Integer pdfConvertMode = 0;

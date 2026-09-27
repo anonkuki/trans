@@ -53,6 +53,13 @@ class ConvertByPythonHelperTest {
                          "continuation_hint":{"source":"","group_id":"","role":"","scope":"","reading_order":0,"confidence":1.0}}
                       ]},
                       {"page_index":0,"width":595,"height":842,"unit":"pt","blocks":[
+                        {"block_id":"b0","page_index":0,"order":0,"reading_order":0,"type":"table",
+                         "geometry":{"bbox":[0,0,1,1]},"content":{"kind":"table","text":"<table><tr><td rowspan='2'>Label</td><td>Value 1</td></tr><tr><td>Value 2</td></tr></table>"},
+                         "layout_role":"table","semantic_role":"body","structure_role":"table",
+                         "policy":{"translate":true,"translate_reason":""},
+                         "provenance":{"provider":"paddle","raw_label":"table","raw_sub_type":"table","raw_bbox":[0,0,1,1],"raw_path":""},
+                         "metadata":{},"source":{"provider":"paddle"},
+                         "continuation_hint":{"source":"","group_id":"","role":"","scope":"","reading_order":0,"confidence":1.0}},
                         {"block_id":"b2","page_index":0,"order":1,"reading_order":2,"type":"text",
                          "geometry":{"bbox":[0,0,1,1]},"content":{"kind":"text","text":"Body"},
                          "layout_role":"paragraph","semantic_role":"body","structure_role":"unknown",
@@ -93,6 +100,10 @@ class ConvertByPythonHelperTest {
                         .filter(text -> !text.isBlank())
                         .toList();
                 assertThat(paragraphs).containsExactly("Heading", "Body", "Second page");
+                assertThat(document.getTables()).hasSize(1);
+                assertThat(document.getTables().get(0).getRows()).hasSize(2);
+                assertThat(document.getTables().get(0).getRow(0).getCell(0).getText()).isEqualTo("Label");
+                assertThat(document.getTables().get(0).getRow(1).getCell(1).getText()).isEqualTo("Value 2");
                 assertThat(document.getParagraphs().stream().filter(XWPFParagraph::isPageBreak).count())
                         .isEqualTo(3);
             }
