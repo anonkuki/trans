@@ -29,8 +29,10 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -102,10 +104,13 @@ class LiveTranslationEvaluationTest {
         Path output = Path.of(requiredProperty("translation.eval.output")).toAbsolutePath();
         Files.createDirectories(output.getParent());
 
-        String apiKey = requiredEnvironment("QWEN_API_KEY");
-        String baseUrl = normalizeSpringOpenAiBaseUrl(environmentOrDefault(
-                "QWEN_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1"));
-        String model = environmentOrDefault("QWEN_MODEL", "qwen3.8-flash");
+        Map<String, String> fileEnvironment = readEvaluationEnvironmentFile();
+        String apiKey = requiredConfiguration("QWEN_API_KEY", "LLM_API_KEY", fileEnvironment);
+        String baseUrl = normalizeSpringOpenAiBaseUrl(configurationOrDefault(
+                "QWEN_API_BASE", "LLM_BASE_URL", fileEnvironment,
+                "https://dashscope.aliyuncs.com/compatible-mode/v1"));
+        String model = configurationOrDefault(
+                "QWEN_MODEL", "LLM_MODEL", fileEnvironment, "qwen3.8-flash");
         String targetLanguage = System.getProperty("translation.eval.target", "English");
         int concurrency = Integer.parseInt(System.getProperty("translation.eval.concurrency", "1"));
         boolean adaptiveConcurrency = Boolean.parseBoolean(
@@ -115,10 +120,17 @@ class LiveTranslationEvaluationTest {
         properties.setConcurrency(concurrency);
         properties.setAdaptiveConcurrencyEnabled(adaptiveConcurrency);
         properties.setTempDir(environmentOrDefault("TRANSDOC_TEMP_DIR", "D:/Temp/trans-platform"));
-        properties.setPythonRecognizeUrl(environmentOrDefault(
-                "TRANSDOC_PYTHON_RECOGNIZE_URL",
-                "http://127.0.0.1:8030/internal/v1/ocr/recognize"));
-        properties.setPythonInternalToken(requiredEnvironment("TRANSDOC_PYTHON_INTERNAL_TOKEN"));
+        properties.setPythonRecognizeUrl(System.getProperty(
+                "translation.eval.python-url",
+                environmentOrDefault("TRANSDOC_PYTHON_RECOGNIZE_URL",
+                        "http://127.0.0.1:8030/internal/v1/ocr/recognize")));
+        properties.setPythonInternalToken(System.getProperty(
+                "translation.eval.python-token",
+                environmentOrDefault("TRANSDOC_PYTHON_INTERNAL_TOKEN", "")));
+        if (input.getFileName().toString().toLowerCase().endsWith(".pdf")
+                && properties.getPythonInternalToken().isBlank()) {
+            throw new IllegalArgumentException("Missing local document-engine token for PDF evaluation");
+        }
         properties.setPythonConnectTimeout(Duration.ofSeconds(10));
         properties.setPythonReadTimeout(Duration.ofMinutes(31));
 
@@ -177,6 +189,7 @@ class LiveTranslationEvaluationTest {
         assertTrue(Files.size(output) > 0, "translation output is empty");
         assertTrue(result.getError() == null || result.getError().isBlank(),
                 () -> "translation reported an error: " + result.getError());
+        assertEquals(0, result.getErrors(), "translation contains failed segments");
 
         System.out.printf(
                 "LIVE_TRANSLATION_EVAL input=%s output=%s model=%s configured_concurrency=%d adaptive=%s ocr_ms=%d translation_ms=%d total_ms=%d%n",
@@ -211,12 +224,58 @@ class LiveTranslationEvaluationTest {
         return value;
     }
 
-    private static String requiredEnvironment(String name) {
-        String value = System.getenv(name);
+    private static Map<String, String> readEvaluationEnvironmentFile() throws Exception {
+        String configured = System.getProperty("translation.eval.env-file", "").trim();
+        if (configured.isEmpty()) {
+            return Map.of();
+        }
+        Path path = Path.of(configured).toAbsolutePath().normalize();
+        if (!Files.isRegularFile(path)) {
+            throw new IllegalArgumentException("Evaluation environment file does not exist: " + path);
+        }
+        Map<String, String> values = new HashMap<>();
+        for (String line : Files.readAllLines(path, StandardCharsets.UTF_8)) {
+            String trimmed = line.trim();
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                continue;
+            }
+            int separator = trimmed.indexOf('=');
+            if (separator <= 0) {
+                continue;
+            }
+            String key = trimmed.substring(0, separator).trim();
+            String value = trimmed.substring(separator + 1).trim();
+            if ((value.startsWith("\"") && value.endsWith("\""))
+                    || (value.startsWith("'") && value.endsWith("'"))) {
+                value = value.substring(1, value.length() - 1);
+            }
+            values.put(key, value);
+        }
+        return values;
+    }
+
+    private static String requiredConfiguration(String environmentName,
+                                                String fileAlias,
+                                                Map<String, String> fileEnvironment) {
+        String value = System.getenv(environmentName);
         if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("Missing environment variable: " + name);
+            value = fileEnvironment.get(fileAlias);
+        }
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("Missing evaluation credential: " + environmentName);
         }
         return value;
+    }
+
+    private static String configurationOrDefault(String environmentName,
+                                                 String fileAlias,
+                                                 Map<String, String> fileEnvironment,
+                                                 String fallback) {
+        String value = System.getenv(environmentName);
+        if (value == null || value.isBlank()) {
+            value = fileEnvironment.get(fileAlias);
+        }
+        return value == null || value.isBlank() ? fallback : value;
     }
 
     private static String environmentOrDefault(String name, String fallback) {

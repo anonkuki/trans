@@ -10,6 +10,11 @@ import org.apache.poi.xwpf.usermodel.XWPFTableCell;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Element;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.STMerge;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTPageSz;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTSectPr;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTTblGrid;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.STPageOrientation;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.STSectionMark;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpEntity;
@@ -31,6 +36,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.math.BigInteger;
 
 @Component
 public class ConvertByPythonHelper {
@@ -95,11 +101,9 @@ public class ConvertByPythonHelper {
             documentNode.path("pages").forEach(pages::add);
             pages.sort(Comparator.comparingInt(page -> page.path("page_index").asInt()));
 
-            boolean firstPage = true;
-            for (JsonNode page : pages) {
-                if (!firstPage) {
-                    wordDocument.createParagraph().setPageBreak(true);
-                }
+            for (int pageIndex = 0; pageIndex < pages.size(); pageIndex++) {
+                JsonNode page = pages.get(pageIndex);
+                boolean landscape = pageNeedsLandscape(page);
                 List<JsonNode> blocks = new ArrayList<>();
                 page.path("blocks").forEach(blocks::add);
                 blocks.sort(Comparator.comparingInt(ConvertByPythonHelper::readingOrder));
@@ -121,7 +125,17 @@ public class ConvertByPythonHelper {
                     }
                     paragraph.createRun().setText(text);
                 }
-                firstPage = false;
+                if (pageIndex < pages.size() - 1) {
+                    XWPFParagraph sectionBreak = wordDocument.createParagraph();
+                    CTSectPr section = sectionBreak.getCTP().addNewPPr().addNewSectPr();
+                    configureSection(section, page, landscape);
+                    section.addNewType().setVal(STSectionMark.NEXT_PAGE);
+                } else {
+                    CTSectPr section = wordDocument.getDocument().getBody().isSetSectPr()
+                            ? wordDocument.getDocument().getBody().getSectPr()
+                            : wordDocument.getDocument().getBody().addNewSectPr();
+                    configureSection(section, page, landscape);
+                }
             }
             wordDocument.write(outputStream);
         } catch (Exception exception) {
@@ -142,6 +156,47 @@ public class ConvertByPythonHelper {
                 && text.toLowerCase().contains("<table");
     }
 
+    private static boolean pageNeedsLandscape(JsonNode page) {
+        if (page.path("width").asDouble() > page.path("height").asDouble()) {
+            return true;
+        }
+        for (JsonNode block : page.path("blocks")) {
+            String text = block.path("content").path("text").asText("");
+            if (isHtmlTable(block, text)) {
+                Element table = Jsoup.parseBodyFragment(text).selectFirst("table");
+                if (table != null) {
+                    int columns = table.select("tr").stream()
+                            .mapToInt(row -> directCells(row).stream()
+                                    .mapToInt(cell -> positiveSpan(cell.attr("colspan")))
+                                    .sum())
+                            .max().orElse(1);
+                    if (columns >= 5) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static void configureSection(CTSectPr section, JsonNode page, boolean landscape) {
+        long width = Math.max(1L, Math.round(page.path("width").asDouble(595) * 20));
+        long height = Math.max(1L, Math.round(page.path("height").asDouble(842) * 20));
+        if (landscape && width < height) {
+            long swap = width;
+            width = height;
+            height = swap;
+        } else if (!landscape && width > height) {
+            long swap = width;
+            width = height;
+            height = swap;
+        }
+        CTPageSz pageSize = section.isSetPgSz() ? section.getPgSz() : section.addNewPgSz();
+        pageSize.setW(BigInteger.valueOf(width));
+        pageSize.setH(BigInteger.valueOf(height));
+        pageSize.setOrient(landscape ? STPageOrientation.LANDSCAPE : STPageOrientation.PORTRAIT);
+    }
+
     private static void appendHtmlTable(XWPFDocument document, String html) {
         Element sourceTable = Jsoup.parseBodyFragment(html).selectFirst("table");
         if (sourceTable == null) {
@@ -160,6 +215,18 @@ public class ConvertByPythonHelper {
         }
 
         XWPFTable table = document.createTable(sourceRows.size(), columnCount);
+        table.setWidth("100%");
+        CTTblGrid tableGrid = table.getCTTbl().getTblGrid();
+        if (tableGrid == null) {
+            tableGrid = table.getCTTbl().addNewTblGrid();
+        }
+        if (tableGrid.sizeOfGridColArray() == 0) {
+            BigInteger columnWidth = BigInteger.valueOf(Math.max(1, 9000 / columnCount));
+            for (int column = 0; column < columnCount; column++) {
+                tableGrid.addNewGridCol().setW(columnWidth);
+            }
+        }
+        table.getRow(0).setRepeatHeader(true);
         boolean[][] occupied = new boolean[sourceRows.size()][columnCount];
         for (int rowIndex = 0; rowIndex < sourceRows.size(); rowIndex++) {
             int columnIndex = 0;
@@ -188,6 +255,11 @@ public class ConvertByPythonHelper {
                 }
                 columnIndex += columnSpan;
             }
+        }
+        if (columnCount >= 5) {
+            table.getRows().forEach(row -> row.getTableCells().forEach(cell ->
+                    cell.getParagraphs().forEach(paragraph -> paragraph.getRuns()
+                            .forEach(run -> run.setFontSize(8)))));
         }
     }
 

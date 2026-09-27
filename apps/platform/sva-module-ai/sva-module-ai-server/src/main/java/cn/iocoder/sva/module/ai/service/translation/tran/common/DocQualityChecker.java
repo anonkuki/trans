@@ -1,5 +1,9 @@
 package cn.iocoder.sva.module.ai.service.translation.tran.common;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -105,29 +109,36 @@ public class DocQualityChecker {
      * 比较纯数字值（去除分隔符），避免因语言间数字格式差异（如西班牙语 1.700 = 中文 1700）导致误报。
      */
     public static QcResult checkNumbers(String source, String target) {
-        Set<String> srcNums = extractMatches(NUMBER_PATTERN, source);
-        Set<String> tgtNums = extractMatches(NUMBER_PATTERN, target);
+        List<String> srcNums = extractMatchList(NUMBER_PATTERN, source);
+        List<String> tgtNums = extractMatchList(NUMBER_PATTERN, target);
+        Map<String, Integer> remainingTargetCounts = new HashMap<>();
+        for (String targetNumber : tgtNums) {
+            remainingTargetCounts.merge(normalizeNumber(targetNumber), 1, Integer::sum);
+        }
 
-        for (String num : srcNums) {
-            if (tgtNums.contains(num)) {
-                continue;
+        for (String sourceNumber : srcNums) {
+            String normalized = normalizeNumber(sourceNumber);
+            int available = remainingTargetCounts.getOrDefault(normalized, 0);
+            if (available <= 0) {
+                return QcResult.error("[ERROR] 数字丢失: " + sourceNumber);
             }
-            // 格式不同但纯数字相同也视为匹配（如 1.700 vs 1700, 8/10 vs 8 10）
-            String normalizedSrc = num.replaceAll("[.,/:]", "");
-            boolean found = false;
-            for (String tgtNum : tgtNums) {
-                String normalizedTgt = tgtNum.replaceAll("[.,/:]", "");
-                if (normalizedSrc.equals(normalizedTgt)) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                return QcResult.error("[ERROR] 数字丢失: " + num);
-            }
+            remainingTargetCounts.put(normalized, available - 1);
         }
 
         return QcResult.ok();
+    }
+
+    private static String normalizeNumber(String value) {
+        return value.replaceAll("[.,/:]", "");
+    }
+
+    private static List<String> extractMatchList(Pattern pattern, String text) {
+        List<String> matches = new ArrayList<>();
+        Matcher matcher = pattern.matcher(text);
+        while (matcher.find()) {
+            matches.add(matcher.group());
+        }
+        return matches;
     }
 
     /**

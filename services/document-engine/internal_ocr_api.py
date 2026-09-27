@@ -75,6 +75,18 @@ class ProviderOcrRecognitionRunner:
         provider: str,
         job_parent: Path,
     ) -> dict:
+        native_enabled = os.getenv("PDF_ENGINE_NATIVE_TEXT_ENABLED", "true").strip().lower() not in {
+            "0", "false", "no", "off"
+        }
+        if native_enabled:
+            from native_text_extractor import try_extract_native_text
+
+            native_document = try_extract_native_text(pdf_path, request_id=request_id)
+            if native_document is not None:
+                _validate_document_v1(native_document)
+                logger.info("Native PDF text route selected request_id=%s", request_id)
+                return native_document
+
         _ensure_pipeline_import_path()
 
         from foundation.shared.job_dirs import create_job_dirs

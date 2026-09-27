@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import zipfile
 
 from docx import Document
 
@@ -77,6 +78,54 @@ def test_numeric_preservation_handles_numbers_adjacent_to_labels(tmp_path: Path)
     assert result["numericPreservation"]["precision"] == 1.0
 
 
+def test_numeric_preservation_normalizes_chinese_section_ordinals(tmp_path: Path) -> None:
+    source = tmp_path / "source.docx"
+    candidate = tmp_path / "candidate.docx"
+    _write_docx(source, ["第二章 一般信息"], [])
+    _write_docx(candidate, ["Chapter 2 General Information"], [])
+
+    result = compare_docx(source, candidate)
+
+    assert result["numericPreservation"]["recall"] == 1.0
+    assert result["numericPreservation"]["precision"] == 1.0
+
+
+def test_numeric_preservation_normalizes_spelled_out_sample_counts(tmp_path: Path) -> None:
+    source = tmp_path / "source.docx"
+    candidate = tmp_path / "candidate.docx"
+    _write_docx(source, ["Two reference tubes were prepared in parallel."], [])
+    _write_docx(candidate, ["平行制备2支标准管。"], [])
+
+    result = compare_docx(source, candidate)
+
+    assert result["numericPreservation"]["recall"] == 1.0
+    assert result["numericPreservation"]["precision"] == 1.0
+
+
+def test_numeric_preservation_normalizes_chinese_spelled_out_counts(tmp_path: Path) -> None:
+    source = tmp_path / "source.docx"
+    candidate = tmp_path / "candidate.docx"
+    _write_docx(source, ["Two reference tubes were prepared in parallel."], [])
+    _write_docx(candidate, ["平行制备两个参考管。"], [])
+
+    result = compare_docx(source, candidate)
+
+    assert result["numericPreservation"]["recall"] == 1.0
+    assert result["numericPreservation"]["precision"] == 1.0
+
+
+def test_numeric_preservation_normalizes_english_sample_ordinals(tmp_path: Path) -> None:
+    source = tmp_path / "source.docx"
+    candidate = tmp_path / "candidate.docx"
+    _write_docx(source, ["Start timing when the first tube is dosed."], [])
+    _write_docx(candidate, ["从第一管加样时开始计时。"], [])
+
+    result = compare_docx(source, candidate)
+
+    assert result["numericPreservation"]["recall"] == 1.0
+    assert result["numericPreservation"]["precision"] == 1.0
+
+
 def test_identifier_preservation_handles_cjk_adjacency(tmp_path: Path) -> None:
     source = tmp_path / "source.docx"
     candidate = tmp_path / "candidate.docx"
@@ -88,3 +137,54 @@ def test_identifier_preservation_handles_cjk_adjacency(tmp_path: Path) -> None:
     assert result["identifierPreservation"]["sourceCount"] == 1
     assert result["identifierPreservation"]["recall"] == 1.0
     assert result["identifierPreservation"]["precision"] == 1.0
+
+
+def test_compare_docx_reports_required_glossary_targets(tmp_path: Path) -> None:
+    source = tmp_path / "source.docx"
+    candidate = tmp_path / "candidate.docx"
+    _write_docx(source, ["执行污染控制策略并调查超标结果。"], [])
+    _write_docx(candidate, ["Implement the contamination strategy and investigate excursions."], [])
+
+    result = compare_docx(
+        source,
+        candidate,
+        glossary={"污染控制策略": "contamination control strategy", "超标": "excursion"},
+    )
+
+    assert result["glossaryPreservation"]["requiredCount"] == 2
+    assert result["glossaryPreservation"]["matchedCount"] == 1
+    assert result["glossaryPreservation"]["missing"] == ["污染控制策略→contamination control strategy"]
+
+
+def test_compare_docx_handles_legacy_table_without_tbl_grid(tmp_path: Path) -> None:
+    source = tmp_path / "legacy-gridless.docx"
+    candidate = tmp_path / "candidate.docx"
+    _write_docx(source, ["表格"], [["A", "B"], ["C", "D"]])
+    _write_docx(candidate, ["Table"], [["A", "B"], ["C", "D"]])
+
+    rewritten = tmp_path / "rewritten.docx"
+    with zipfile.ZipFile(source) as input_zip, zipfile.ZipFile(rewritten, "w") as output_zip:
+        for item in input_zip.infolist():
+            content = input_zip.read(item.filename)
+            if item.filename == "word/document.xml":
+                start = content.index(b"<w:tblGrid>")
+                end = content.index(b"</w:tblGrid>", start) + len(b"</w:tblGrid>")
+                content = content[:start] + content[end:]
+            output_zip.writestr(item, content)
+    rewritten.replace(source)
+
+    result = compare_docx(source, candidate)
+
+    assert result["source"]["tableDimensions"] == [{"rows": 2, "columns": 2}]
+    assert result["structure"]["tableDimensionsMatch"] is True
+
+
+def test_compare_docx_counts_long_latin_sentence_residue(tmp_path: Path) -> None:
+    source = tmp_path / "source.docx"
+    candidate = tmp_path / "candidate.docx"
+    _write_docx(source, ["制备测试样品管。"], [])
+    _write_docx(candidate, ["According to the source of the test product, prepare the test sample tube.依"], [])
+
+    result = compare_docx(source, candidate)
+
+    assert result["candidate"]["latinSentenceResidueCount"] == 1

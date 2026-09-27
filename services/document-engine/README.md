@@ -80,6 +80,8 @@ http://localhost:8040/docs
 
 扫描件、图片型 PDF 和图片翻译会走 OCR。项目支持在 `.env` 中设置默认 OCR，也支持创建任务时临时覆盖。对外只需要理解两个选项：`cloud` 表示云端 PaddleOCR，`local` 表示本地部署 OCR。
 
+系统 1 的内部 OCR 接口默认启用 PDF 文本层检测（`PDF_ENGINE_NATIVE_TEXT_ENABLED=true`）：当各页文本覆盖达到阈值时，直接用 PyMuPDF 按页和阅读顺序生成 `document.v1`，不调用 Paddle；图片型或文本覆盖不足的 PDF 自动回退到 PaddleOCR。可将该变量设为 `false` 临时关闭快速路径。
+
 ### 使用云端 PaddleOCR
 
 `.env` 中保持：

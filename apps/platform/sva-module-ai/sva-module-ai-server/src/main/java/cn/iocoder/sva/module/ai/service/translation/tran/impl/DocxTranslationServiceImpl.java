@@ -1,8 +1,10 @@
 package cn.iocoder.sva.module.ai.service.translation.tran.impl;
 
 import cn.iocoder.sva.module.ai.service.translation.tran.*;
+import cn.iocoder.sva.module.ai.service.translation.tran.common.BilingualDocumentDetector;
 import cn.iocoder.sva.module.ai.service.translation.tran.common.DocQualityChecker;
 import cn.iocoder.sva.module.ai.service.translation.tran.common.DocxUtils;
+import cn.iocoder.sva.module.ai.service.translation.tran.common.ProtectedTokenCodec;
 import cn.iocoder.sva.module.ai.service.translation.tran.config.TransDocProperties;
 import cn.iocoder.sva.module.ai.service.translation.tran.config.TranslationConcurrencyPolicy;
 import cn.iocoder.sva.module.ai.service.translation.tran.model.TranslationPair;
@@ -63,9 +65,6 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
     private static final Pattern ALPHA_PATTERN = Pattern.compile("[A-Za-z]");
     /** 仅符号正则 */
     private static final Pattern ONLY_SYMBOLS = Pattern.compile("^[\\s\\W_]+$", Pattern.UNICODE_CHARACTER_CLASS);
-    /** Numeric tokens used to make quality-correction prompts explicit. */
-    private static final Pattern NUMBER_TOKEN_PATTERN = Pattern.compile("[0-9]+(?:[.,/:][0-9]+)*");
-
     public DocxTranslationServiceImpl(TransDocProperties properties,
                                        LlmClientService llmClient,
                                        GlossaryService glossaryService,
@@ -126,6 +125,25 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
                 log.warn("[{}] 文档内容为空，无法翻译", jobId);
                 return new TranslationResult(0, new HashMap<>(), "", pairs, outputPath, contrastOutputPath,
                         0, "无法翻译空文档，请上传包含有效内容的文档");
+            }
+
+            List<String> documentTexts = transIndices.stream()
+                    .map(paragraphs::get)
+                    .map(XWPFParagraph::getText)
+                    .toList();
+            if (BilingualDocumentDetector.isAlternatingBilingual(documentTexts)) {
+                doc.close();
+                Path sourcePath = Paths.get(inputPath).toAbsolutePath().normalize();
+                Path targetPath = Paths.get(outputPath).toAbsolutePath().normalize();
+                if (!sourcePath.equals(targetPath)) {
+                    if (targetPath.getParent() != null) {
+                        Files.createDirectories(targetPath.getParent());
+                    }
+                    Files.copy(sourcePath, targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+                log.info("[{}] 已识别为中英交替双语文档，原样复制并跳过重复翻译: {}", jobId, outputPath);
+                return new TranslationResult(0, new HashMap<>(), "", pairs, outputPath,
+                        null, 0, null);
             }
 
             int total = transIndices.size();
@@ -316,8 +334,8 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
         }
 
         long elapsed = System.currentTimeMillis() - startTime;
-        log.info("[{}] END segments={} errors={} elapsed={:.2f}s",
-                jobId, pairs.size(), errorCount.get(), elapsed / 1000.0);
+        log.info("[{}] END segments={} errors={} elapsedMs={}",
+                jobId, pairs.size(), errorCount.get(), elapsed);
 
         return new TranslationResult(
                 pairs.size(), qcReport, qcTxtPath,
@@ -400,51 +418,12 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
             boolean useGlossaryReplace,
             Map<String, CompletableFuture<TranslateResult>> dedupCache) {
 
-        List<GroupResult> groupResults = new ArrayList<>();
-        List<String> statusList = new ArrayList<>();
-
-        for (DocxUtils.StyleGroup group : groups) {
-            String gText = group.getMergedText();
-
-            // 空白或仅符号
-            if (gText.isBlank() || isOnlyBullets(gText)) {
-                groupResults.add(new GroupResult(group.getStyleKey(), gText));
-                statusList.add("无需翻译");
-                continue;
-            }
-
-            // 按句子分割翻译
-            String[] parts = DocxUtils.SENT_SPLIT_PATTERN.split(gText);
-            List<String> translatedParts = new ArrayList<>();
-            List<String> partStatuses = new ArrayList<>();
-
-            for (String part : parts) {
-                if (part.isBlank()) continue;
-
-                // 翻译每个片段
-                TranslateResult tr = translateDeduplicated(
-                        "S:" + targetLanguage + ":" + part,
-                        part, targetLanguage, glossary, useGlossaryReplace, dedupCache);
-
-                translatedParts.add(tr.getContent());
-                partStatuses.add(tr.getStatus());
-            }
-
-            // 【关键修复】不能用空格拼接！原文是各 run 文本的直接拼接（无分隔符），
-            // 翻译结果也必须保持一致，否则 ZIP 回写时 textMap 匹配失败。
-            String translated = String.join("", translatedParts);
-            groupResults.add(new GroupResult(group.getStyleKey(), translated));
-            statusList.add(mergeStatuses(partStatuses));
-        }
-
-        String mergedStatus = mergeStatuses(statusList);
-        // 【关键修复】不能用空格拼接样式组翻译结果！
-        // 原文（POI getText()）是各 run 文本的直接拼接（无分隔符），
-        // 如果用空格拼接翻译结果，会导致与原文不匹配，
-        // 后续 ZIP 回写时 textMap 查找失败，翻译无法写入文档。
-        String mergedText = String.join("", groupResults.stream().map(g -> g.text != null ? g.text : "").toList());
-
-        return new ParagraphResult(idx, "strict_groups", src, mergedText, mergedStatus, groupResults);
+        // 样式组只是排版边界，不是语义边界。逐 run 翻译会破坏词序、空格和上下文，
+        // 因此严格格式模式也按完整段落调用一次模型；ZIP 写回仍保留段落和表格结构。
+        TranslateResult result = translateDeduplicated(
+                "P:" + targetLanguage + ":" + src,
+                src, targetLanguage, glossary, useGlossaryReplace, dedupCache);
+        return new ParagraphResult(idx, "paragraph", src, result.getContent(), result.getStatus());
     }
 
     /**
@@ -523,6 +502,37 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
             Map<String, String> glossary,
             boolean useGlossaryReplace) {
 
+        if (isPureTarget(text, targetLanguage)) {
+            return new TranslateResult(text, "无需翻译");
+        }
+
+        ProtectedTokenCodec.EncodedText encoded = ProtectedTokenCodec.encode(text);
+        Map<String, String> relevantGlossary = useGlossaryReplace
+                ? extractRelevantTerms(text, glossary) : Map.of();
+        TranslateResult modelResult = translateProtectedText(
+                encoded.text(), targetLanguage, glossary, useGlossaryReplace);
+        if (isErrorStatus(modelResult.getStatus())) {
+            return modelResult;
+        }
+
+        if (encoded.hasAllPlaceholders(modelResult.getContent())) {
+            String restored = encoded.restore(modelResult.getContent());
+            DocQualityChecker.QcResult qc = DocQualityChecker.check(text, restored);
+            if (qc.isOk() && "OK".equals(validateGlossaryUsage(restored, relevantGlossary))) {
+                return new TranslateResult(restored, modelResult.getStatus());
+            }
+        }
+
+        return strictQualityCorrection(text, targetLanguage, modelResult.getStatus(),
+                encoded.placeholders().values(), relevantGlossary);
+    }
+
+    private TranslateResult translateProtectedText(
+            String text,
+            String targetLanguage,
+            Map<String, String> glossary,
+            boolean useGlossaryReplace) {
+
         // 判断当前使用的翻译模式
         boolean isConstraintMode = translationModeConfig.isConstraintMode();
 
@@ -533,6 +543,50 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
             // 旧模式：术语替换
             return translateWithTermReplacement(text, targetLanguage, glossary, useGlossaryReplace);
         }
+    }
+
+    private TranslateResult strictQualityCorrection(String source,
+                                                     String targetLanguage,
+                                                     String successStatus,
+                                                     Collection<String> requiredTokens,
+                                                     Map<String, String> requiredGlossary) {
+        String correctionInput = "Translate only the SOURCE text below into " + targetLanguage + ". "
+                + "Keep every listed token literally and exactly once. Never spell digits as words, alter units, "
+                + "or alter document identifiers. Required tokens: " + requiredTokens
+                + ". Required terminology (source=target): " + requiredGlossary
+                + ". Return only the corrected translation.\nSOURCE:\n" + source;
+        LlmClientService.TranslateResult correction = llmClient.cachedCall(
+                LlmClientService.CallKind.STRICT, correctionInput, targetLanguage);
+        LlmClientService.TranslateResult corrected = llmClient.sanitizeOrRetry(
+                source, targetLanguage, correction.getContent(), correction.getUsage());
+        if (!isErrorStatus(corrected.getStatus())
+                && DocQualityChecker.check(source, corrected.getContent()).isOk()
+                && containsRequiredValuesExactly(corrected.getContent(), requiredTokens)
+                && "OK".equals(validateGlossaryUsage(corrected.getContent(), requiredGlossary))) {
+            return new TranslateResult(corrected.getContent(), successStatus);
+        }
+        return new TranslateResult(source, "[ERROR] protected token preservation failed");
+    }
+
+    private static boolean containsRequiredValuesExactly(String candidate, Collection<String> requiredValues) {
+        if (candidate == null) {
+            return requiredValues.isEmpty();
+        }
+        Map<String, Long> expectedCounts = requiredValues.stream()
+                .collect(java.util.stream.Collectors.groupingBy(value -> value,
+                        LinkedHashMap::new, java.util.stream.Collectors.counting()));
+        for (Map.Entry<String, Long> entry : expectedCounts.entrySet()) {
+            long actual = 0;
+            int from = 0;
+            while ((from = candidate.indexOf(entry.getKey(), from)) >= 0) {
+                actual++;
+                from += entry.getKey().length();
+            }
+            if (actual != entry.getValue()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -582,33 +636,9 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
             return new TranslateResult(text, sanitized.getStatus());
         }
 
-        // 质量检查
-        DocQualityChecker.QcResult qcResult = DocQualityChecker.check(replaced, sanitized.getContent());
-        if (!qcResult.isOk()) {
-            List<String> requiredNumbers = NUMBER_TOKEN_PATTERN.matcher(replaced)
-                    .results().map(match -> match.group()).distinct().toList();
-            String correctionInput = "Translate only the SOURCE text below into " + targetLanguage + ". "
-                    + "Keep every number, decimal, unit, document identifier, and section number exactly as written; "
-                    + "never spell digits as words. The output must literally contain these numeric tokens: "
-                    + requiredNumbers + ". In particular, translate quantities such as 2份 as '2 copies', not "
-                    + "'two copies'. Return only the corrected translation.\nSOURCE:\n" + replaced;
-            LlmClientService.TranslateResult correction = llmClient.cachedCall(
-                    LlmClientService.CallKind.STRICT, correctionInput, targetLanguage);
-            LlmClientService.TranslateResult corrected = llmClient.sanitizeOrRetry(
-                    replaced, targetLanguage, correction.getContent(), correction.getUsage());
-            DocQualityChecker.QcResult correctedQc = DocQualityChecker.check(replaced, corrected.getContent());
-            if (correctedQc.isOk()) {
-                sanitized = corrected;
-                qcResult = correctedQc;
-            }
-        }
-        // 根据covered判断状态：0=未命中，>0=部分命中
-        String status;
-        if (qcResult.isOk()) {
-            status = (covered == 0) ? "未命中" : "部分命中";
-        } else {
-            status = qcResult.getStatus();
-        }
+        // 数字、单位、编号的统一校验由 translateText 外层的 ProtectedTokenCodec 负责。
+        // 在这里重复校验会把 __SVA_KEEP_0000__ 中的序号误判为业务数字。
+        String status = (covered == 0) ? "未命中" : "部分命中";
 
         return new TranslateResult(
                 sanitized.getContent() != null ? sanitized.getContent() : text,
@@ -885,10 +915,14 @@ public class DocxTranslationServiceImpl implements DocxTranslationService {
             return !CJK_PATTERN.matcher(text).find();
         }
         if (targetLanguage.toLowerCase().startsWith("chinese")) {
-            // 目标是中文：如果文本含有汉字，认为已是中文（无需翻译）
-            // 如果文本含英文字母但没有汉字，认为是英文（需要翻译）
-            if (CJK_PATTERN.matcher(text).find()) return true;
-            return !ALPHA_PATTERN.matcher(text).find();
+            // A stray CJK character must not make an otherwise English sentence look translated.
+            // Short identifiers such as SOP/GMP inside a Chinese sentence remain valid target text.
+            long cjkCount = CJK_PATTERN.matcher(text).results().count();
+            long alphaCount = ALPHA_PATTERN.matcher(text).results().count();
+            if (cjkCount == 0) {
+                return alphaCount == 0;
+            }
+            return alphaCount <= 8 || cjkCount * 2 >= alphaCount;
         }
         return false;
     }

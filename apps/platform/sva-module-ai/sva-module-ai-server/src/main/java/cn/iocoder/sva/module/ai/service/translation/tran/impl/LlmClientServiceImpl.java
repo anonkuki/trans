@@ -335,7 +335,7 @@ public class LlmClientServiceImpl implements LlmClientService {
 
             Prompt prompt = new Prompt(messages, options);
 
-            // 【新增】检测是否为 QC 调用，如果是则打印完整提示词
+            // 检测 QC 调用，但不得把受控文档正文或完整提示词写入日志。
             boolean isQcCall = systemPrompt != null && (
                     systemPrompt.contains("scientific copy editor") ||
                     systemPrompt.contains("质量审校")
@@ -343,7 +343,6 @@ public class LlmClientServiceImpl implements LlmClientService {
 
             if (isQcCall) {
                 log.info("[QC调用检测] 检测到 QC 专用提示词");
-                log.info("[QC-系统提示词] \n{}", systemPrompt);
             }
 
             // 记录调用前的详细信息
@@ -364,15 +363,10 @@ public class LlmClientServiceImpl implements LlmClientService {
 
             UsageStats usage = extractUsage(response);
 
-            // 【日志】打印发给AI的完整内容（系统提示词 + 用户原文）和AI返回的完整内容
-            log.info("[LLM翻译] 耗时: {}ms\n" +
-                    "===== 发给AI的完整内容（System Prompt + User Message）=====\n{}\n{}\n" +
-                    "===== AI返回完整内容 =====\n{}\n" +
-                    "===== END =====",
+            log.info("[LLM翻译] 耗时={}ms, inputChars={}, outputChars={}",
                     elapsedTime,
-                    systemPrompt != null ? systemPrompt : "(null)",
-                    text != null ? text : "(null)",
-                    content != null ? content : "(null)");
+                    text != null ? text.length() : 0,
+                    content != null ? content.length() : 0);
 
             return new TranslateResult(content, usage, "OK");
 
@@ -677,15 +671,10 @@ public class LlmClientServiceImpl implements LlmClientService {
         // 构建术语约束翻译的系统提示词
         String systemPrompt = buildConstraintPrompt(targetLanguage, glossaryMap);
 
-        // 【调试日志】打印原文和术语信息
-        log.info("[术语约束翻译-输入信息] 原文长度={}, 术语数={}, 目标语言={}, 原文前100字符='{}'",
+        log.info("[术语约束翻译] 原文长度={}, 术语数={}, 目标语言={}",
                 text != null ? text.length() : 0,
                 glossaryMap != null ? glossaryMap.size() : 0,
-                targetLanguage,
-                text != null ? text.substring(0, Math.min(100, text.length())) : "null");
-        // 【调试日志】打印实际传给大模型的完整系统提示词，便于核对术语对照表是否正确拼入
-        log.info("[术语约束翻译-完整提示词] 目标语言={}, 术语数={}, systemPrompt=\n{}",
-                targetLanguage, glossaryMap != null ? glossaryMap.size() : 0, systemPrompt);
+                targetLanguage);
 
         // 执行翻译调用（temperature=0.2，保持一定的灵活性）
         return executeCall(systemPrompt, text, 0.2);

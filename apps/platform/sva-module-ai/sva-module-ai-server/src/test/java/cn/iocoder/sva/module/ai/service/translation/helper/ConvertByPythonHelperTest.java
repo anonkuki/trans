@@ -43,7 +43,7 @@ class ConvertByPythonHelperTest {
                     "source":{"provider":"paddle"},
                     "page_count":4,
                     "pages":[
-                      {"page_index":1,"width":595,"height":842,"unit":"pt","blocks":[
+                      {"page_index":1,"width":842,"height":595,"unit":"pt","blocks":[
                         {"block_id":"b3","page_index":1,"order":2,"type":"text",
                          "geometry":{"bbox":[0,0,1,1]},"content":{"kind":"text","text":"Second page"},
                          "layout_role":"paragraph","semantic_role":"body","structure_role":"unknown",
@@ -101,11 +101,24 @@ class ConvertByPythonHelperTest {
                         .toList();
                 assertThat(paragraphs).containsExactly("Heading", "Body", "Second page");
                 assertThat(document.getTables()).hasSize(1);
+                assertThat(document.getTables().get(0).getCTTbl().getTblGrid()).isNotNull();
                 assertThat(document.getTables().get(0).getRows()).hasSize(2);
                 assertThat(document.getTables().get(0).getRow(0).getCell(0).getText()).isEqualTo("Label");
                 assertThat(document.getTables().get(0).getRow(1).getCell(1).getText()).isEqualTo("Value 2");
+                assertThat(document.getTables().get(0).getRow(0).isRepeatHeader()).isTrue();
                 assertThat(document.getParagraphs().stream().filter(XWPFParagraph::isPageBreak).count())
-                        .isEqualTo(3);
+                        .isZero();
+                assertThat(document.getParagraphs().stream()
+                        .filter(paragraph -> paragraph.getCTP().isSetPPr()
+                                && paragraph.getCTP().getPPr().isSetSectPr())
+                        .count()).isEqualTo(3);
+                assertThat(document.getParagraphs().stream()
+                        .filter(paragraph -> paragraph.getCTP().isSetPPr()
+                                && paragraph.getCTP().getPPr().isSetSectPr()
+                                && paragraph.getCTP().getPPr().getSectPr().isSetPgSz()
+                                && "landscape".equals(paragraph.getCTP().getPPr().getSectPr()
+                                        .getPgSz().getOrient().toString()))
+                        .count()).isEqualTo(1);
             }
             server.verify();
         } finally {
